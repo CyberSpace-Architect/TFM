@@ -3,9 +3,11 @@ charset-normalizer==3.4.1
 idna==3.10
 mwparserfromhell==0.6.6
 packaging==24.2
-pywikibot==9.6.2
+pywikibot~=10.0.0
 requests==2.32.3
 soupsieve==2.6
 typing_extensions==4.12.2
 urllib3==2.3.0
 wikipedia==1.4.0
+
+sortedcontainers~=2.4.0
