@@ -69,7 +69,7 @@ class EditWarDetector(object):
             debug_idx = 1
             for j in range(i+1, len(revisions_and_fuzzy_hashes_list)):
                 #print(debug_idx)
-                debug_idx += 1
+                #debug_idx += 1
                 revision_and_hash2 = revisions_and_fuzzy_hashes_list[j]
 
                 if ppdeep.compare(revision_and_hash1[1], revision_and_hash2[1]) >= 90:
@@ -78,6 +78,7 @@ class EditWarDetector(object):
                         n_reverts += 1
 
             print(f"\t\tRevisions_analyzed: {debug_idx}, total nº of reverts detected: {n_reverts}")
+            debug_idx += 1
 
         # Traverse reverts list looking for mutual reverts and store them when found
         for i in range(len(reverts_with_hashes_list)-1):
