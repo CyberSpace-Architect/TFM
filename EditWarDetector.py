@@ -34,44 +34,50 @@ class EditWarDetector(object):
 
 
     def detect_edit_wars_in_set(self):
+        print("\n===> Starting detection of edit wars...")
         for article in self.articles_set:
+            print(f"\nAnalyzing article {article.title()}")
             edit_war_tag = self.is_article_in_edit_war(article)
             self.articles_with_edit_war_tags[article] = edit_war_tag
-
 
 
 
     def is_article_in_edit_war(self, article: pywikibot.Page):
         edit_war = False
 
+        print("\tRequesting revisions within time range to Wikipedia")
         revs = WikiCrawler.WikiCrawler.revisions_within_range(article, self.rev_start_date, self.rev_end_date)
+        print(f"\tRevisions received, number of revisions {len(revs)}")
         revisions_and_fuzzy_hashes_list = []
         reverts_with_hashes_list = []
         mutual_reverts_list = []
         mutual_reversers_dict = {}
         nr_values_list = []
 
-        debug_idx = 1
-        print(len(revs))
+        #debug_idx = 1
         # Calculate fuzzy hash of every revision and store them in a list
         for rev in revs:
-            print(debug_idx)
-            debug_idx += 1
+            #print(debug_idx)
+            #debug_idx += 1
             revisions_and_fuzzy_hashes_list.append((rev, ppdeep.hash(str(rev))))
 
-
+        print("\tStarting to analyse each revision within time range for reverts")
+        n_reverts = 0
         # Traverse revisions list looking for reverts (skipping self-reverts) and store them when found
         for i in range(len(revisions_and_fuzzy_hashes_list)-1):
             revision_and_hash1 = revisions_and_fuzzy_hashes_list[i]
             debug_idx = 1
             for j in range(i+1, len(revisions_and_fuzzy_hashes_list)):
-                print(debug_idx)
+                #print(debug_idx)
                 debug_idx += 1
                 revision_and_hash2 = revisions_and_fuzzy_hashes_list[j]
 
                 if ppdeep.compare(revision_and_hash1[1], revision_and_hash2[1]) >= 90:
                     if revision_and_hash1[0].user == revision_and_hash2[0].user:
                         reverts_with_hashes_list.append((revision_and_hash1, revision_and_hash2))
+                        n_reverts += 1
+
+            print(f"\t\tRevisions_analyzed: {debug_idx}, total nº of reverts detected: {n_reverts}")
 
         # Traverse reverts list looking for mutual reverts and store them when found
         for i in range(len(reverts_with_hashes_list)-1):
@@ -143,6 +149,8 @@ class EditWarDetector(object):
             # Alert of edit war in the article if the value surpasses the threshold
             if edit_war_value > self.EDIT_WAR_THRESHOLD:
                 edit_war = True
+
+        print(f"Analysis finished, article with edit war?: {edit_war}")
 
         return edit_war
 
