@@ -2,14 +2,22 @@ import pywikibot
 from datetime import datetime, timedelta
 from sortedcontainers import SortedSet
 
+import Utils
 from EditWarDetector import EditWarDetector
-from Utils import validate_idx, validate_date_format
+#from EditWarDetectorTexto import EditWarDetector
+#from EditWarDetectorPPdeep import EditWarDetector
+from Utils import validate_idx, validate_date_format, clear_terminal, clear_n_lines
+
+import logging
+logging.getLogger("pywikibot.api").setLevel(logging.ERROR)
 
 
 class WikiCrawler(object):
     CHOOSE_OPTION_MSG = "Select an option "
-    INVALID_OPTION_MSG = "Invalid option, please select one of the list (enter to continue) "
+    INVALID_OPTION_MSG = "Invalid option, please select one of the list. (Enter to continue) "
+    EMPTY_SET_MSG = "Search set empty, please first search some articles with option 1. (Enter to continue) "
     MENU_DELIMITER = "\n#################################################################\n"
+    RESULTS_DELIMITER = "\n-----------------------------------------------------------------\n"
     DATE_FORMAT = "%d/%m/%Y"
 
     articles_set: SortedSet[pywikibot.Page] = None
@@ -23,11 +31,11 @@ class WikiCrawler(object):
         self.search_articles_set = SortedSet()
 
 
-
     def exec(self):
         opt = ""
 
         while opt != '6':
+            clear_terminal()
             print(self.MENU_DELIMITER)
             print("[1] Search articles by keywords")
             print("[2] Search articles related to one of the articles within the set")
@@ -42,18 +50,18 @@ class WikiCrawler(object):
                     # Ask user about search parameters
                     search = input("What do you want to search for? ")
 
-                    valid_limit = False
-                    while not valid_limit:
-                        limit = input("How many pages do you want to search at most? (0 for no limit) ")
+                    while search == "":
+                        search = input("Search field cannot be empty, please try again ")
 
-                        if limit.isdigit() and int(limit) >= 0:
-                            valid_limit = True
-                            limit = int(limit)
-                        else:
-                            input("Invalid limit, introduce a value equal or higher than zero (Enter to continue) ")
+                    limit = input("How many pages do you want to search at most? (Enter for no limit) ")
+
+                    while limit != "" and (not limit.isdigit() or int(limit) <= 0):
+                        limit = input("Invalid limit, introduce a value higher than zero ")
+
+                    limit = None if limit == "" else int(limit)
 
                     # Crawl wikipedia for articles
-                    pages = self.crawl_articles(search, limit, search_type=0)
+                    pages = self.crawl_articles(search, search_limit=limit, search_type=0)
 
                     # Save results in SortedSet as PageGenerator only allows to iterate it once
                     for page in pages:
@@ -61,73 +69,92 @@ class WikiCrawler(object):
 
                     if len(self.search_articles_set) == 0:
                         input("Search yielded no results (Enter to continue) ")
-                    else:
-                        # New menu until user wants to return
-                        while opt != '2':
-                            opt = self.searched_articles_menu()
+                        continue
+
+                    # New menu until user wants to return
+                    while opt != '0':
+                        opt = self.searched_articles_menu()
 
                 case '2':
                     # Check articles set has at least 1 article to search related categories
                     if len(self.articles_set) == 0:
-                        input("Search set empty, please first search some articles with option 1 (Enter to continue) ")
-                    else:
-                        # Show search set
-                        self.print_pages(self.articles_set, time_range=None, history_changes=False, discussion_changes=False)
+                        #input(self.EMPTY_SET_MSG)
+                        input(self.EMPTY_SET_MSG)
+                        continue
 
-                        idx = input("Select index of the article that you want to add ")
-                        idx = validate_idx(idx, 0, len(self.articles_set))
+                    # Show search set
+                    self.print_pages(self.articles_set, time_range=None, history_changes=False, discussion_changes=False)
+                    print(f'\nArticles in search set: {len(self.articles_set)}\n')
 
-                        # Extract related categories
-                        pages = self.articles_set[idx].categories()
+                    idx = input("Select index of the article for which you want to search related categories ")
+                    idx = int(validate_idx(idx, 0, len(self.articles_set)))
 
-                        # Save results in SortedSet as PageGenerator only allows to iterate it once
-                        for page in pages:
-                            self.search_categories_set.add(page)
+                    if idx == 0:
+                        continue
 
-                        if len(self.search_categories_set) == 0:
-                            input("No related categories for this article (Enter to continue) ")
-                        else:
-                            # New menu until user wants to return
-                            opt = ""
-                            while opt != '2':
-                                opt = self.searched_categories_menu()
+                    # Extract related categories
+                    pages = self.articles_set[idx-1].categories()
+
+                    # Save results in SortedSet as PageGenerator only allows to iterate it once
+                    for page in pages:
+                        self.search_categories_set.add(page)
+
+                    if len(self.search_categories_set) == 0:
+                        clear_terminal()
+                        input("No related categories for this article (Enter to continue) ")
+                        continue
+
+                    # New menu until user wants to return
+                    opt = ""
+                    while opt != '0':
+                        opt = self.searched_categories_menu()
 
                 case '3':
                     # Check articles set is not empty before calculating edit-war values
                     if len(self.articles_set) == 0:
-                        print("Search set empty, please first search some articles with option 1")
+                        input(self.EMPTY_SET_MSG)
+                        continue
 
-
-                    start_date = input("Specify start date (dd/mm/YYYY) to count revisions of searched articles (leave blank and press Enter to use past 30 days) ")
+                    start_date = input("Specify start date (dd/mm/YYYY) to count revisions of searched articles "
+                                       "(leave blank and press Enter to use past 30 days) ")
                     if start_date == "":
                         start_date = (datetime.now() - timedelta(days=30))
                     else:
                         while not validate_date_format(start_date, self.DATE_FORMAT):
-                            start_date = input("Invalid date, please, introduce a valid one")
+                            start_date = input("Invalid date, please, introduce a valid one ")
                         start_date = datetime.strptime(start_date, self.DATE_FORMAT)
 
-                    end_date = input("Specify end date (dd/mm/YYYY) to count revisions of searched articles (leave blank and press Enter to use current date)")
+                    end_date = input("Specify end date (dd/mm/YYYY) to count revisions of searched articles"
+                                     " (leave blank and press Enter to use current date)")
                     if end_date == "":
                         end_date = datetime.now()
                     else:
                         while not validate_date_format(end_date, self.DATE_FORMAT):
-                            end_date = input("Invalid date, please, introduce a valid one")
+                            end_date = input("Invalid date, please, introduce a valid one ")
                         end_date = datetime.strptime(end_date, self.DATE_FORMAT)
 
                     edit_war_detector = EditWarDetector(self.articles_set, start_date, end_date)
                     edit_war_detector.detect_edit_wars_in_set()
+
+                    print(self.RESULTS_DELIMITER)
+                    print("Summary of results:\n")
                     edit_war_detector.print_pages_with_tags()
 
+                    input("\nEnter to return to Main menu ")
+
                 case '4':
-                    None
+                    if len(self.articles_set) == 0:
+                        input(self.EMPTY_SET_MSG)
+                        continue
 
                 case '5':
                     # Check articles set has at least 1 article to delete
                     if len(self.articles_set) == 0:
-                        input("Search set empty, please first search some articles with option 1 (Enter to continue) ")
-                    else:
-                        while opt != '2':
-                            opt = self.delete_articles_menu()
+                        input(self.EMPTY_SET_MSG)
+                        continue
+
+                    while opt != '0':
+                        opt = self.delete_articles_menu()
 
                 # Exit
                 case '6':
@@ -137,61 +164,66 @@ class WikiCrawler(object):
                     input(self.INVALID_OPTION_MSG)
 
 
-
     def searched_articles_menu(self):
+        clear_terminal()
         print(self.MENU_DELIMITER)
+
         # Show search results
         self.print_pages(self.search_articles_set, time_range=None, history_changes=False, discussion_changes=False)
+        print(f'\nResults found: {len(self.search_articles_set)}')
+
+        print(self.RESULTS_DELIMITER)
+        idx = ""
+
+        while idx != '0':
+            if len(self.articles_set) == 0:
+                print("No articles added yet\n")
+                Utils.shared_dict["lines_to_remove"] = Utils.shared_dict.get("lines_to_remove", 0) + 2
+            else:
+                self.print_pages(self.articles_set, time_range=None, history_changes=False, discussion_changes=False)
+                print("\nArticles added: " + str(len(self.articles_set)) + "\n")
+                Utils.shared_dict["lines_to_remove"] = Utils.shared_dict.get("lines_to_remove", 0) + len(self.articles_set) + 4
 
         # Show options
-        print("[1] Select articles you want to add to search set")
-        print("[2] Return\n")
+            idx = validate_idx(input("Select index of the article you want to add to search set (0 to return) "),
+                                     0, len(self.search_articles_set))
+            Utils.shared_dict["lines_to_remove"] = Utils.shared_dict.get("lines_to_remove", 0) + 1
 
-        opt = input(self.CHOOSE_OPTION_MSG)
-        match opt:
-            case '1':
-                idx = input("Select index of the article that you want to add ")
-                idx = validate_idx(idx, 0, len(self.search_articles_set))
-
-                self.articles_set.add(self.search_articles_set[idx])
-                self.search_articles_set.pop(idx)
-
-            case '2':
+            if idx != '0':
+                self.articles_set.add(self.search_articles_set[int(idx) - 1])
+                clear_n_lines(Utils.shared_dict.get("lines_to_remove", 0))
+            else:
                 self.search_articles_set.clear()
 
-            case _:
-                input(self.INVALID_OPTION_MSG)
+            Utils.shared_dict["lines_to_remove"] = 0
 
-        return opt
+        return idx
 
 
 
     def searched_categories_menu(self):
+        clear_terminal()
         print(self.MENU_DELIMITER)
+
         # Show search results
         self.print_pages(self.search_categories_set, time_range=None, history_changes=False, discussion_changes=False)
+        print(f'\nResults found: {len(self.search_categories_set)}\n')
 
         # Show options
-        print("[1] Search articles within a category")
-        print("[2] Return\n")
+        idx = ""
+        while idx != '0':
+            idx = validate_idx(input("Select index of the category for which you want to search related articles (0 to return) "),
+                           0, len(self.search_categories_set))
 
-        opt = input(self.CHOOSE_OPTION_MSG)
-        match opt:
-            case '1':
-                idx = input("Select category index to search articles ")
-                idx = validate_idx(idx, 0, len(self.search_categories_set))
+            if idx != '0':
+                limit = input("How many pages do you want to search at most? (Enter for no limit) ")
 
-                valid_limit = False
-                while not valid_limit:
-                    limit = input("How many pages do you want to search at most? (0 for no limit) ")
+                while limit != "" and (not limit.isdigit() or int(limit) <= 0):
+                    limit = input("Invalid limit, introduce a value higher than zero ")
 
-                    if limit.isdigit() and int(limit) >= 0:
-                        valid_limit = True
-                        limit = int(limit)
-                    else:
-                        input("Invalid limit, introduce a value equal or higher than zero (Enter to continue) ")
+                limit = None if limit == "" else int(limit)
 
-                pages = self.crawl_articles((self.search_categories_set[idx]).title(), search_limit=limit, search_type=1)
+                pages = self.crawl_articles((self.search_categories_set[int(idx)]).title(), search_limit=limit, search_type=1)
 
                 for page in pages:
                     self.search_articles_set.add(page)
@@ -199,57 +231,49 @@ class WikiCrawler(object):
                 if len(self.search_articles_set) == 0:
                     input("Search yielded no results try another category (Enter to continue) ")
                 else:
-                    while opt != '2':
-                        opt = self.searched_articles_menu()
-                    opt = '1'
+                    idx_2 = ""
+                    while idx_2 != '0':
+                        idx_2 = self.searched_articles_menu()
 
-            case '2':
+                    # Print menu contents again
+                    clear_terminal()
+                    print(self.MENU_DELIMITER)
+                    self.print_pages(self.search_categories_set, time_range=None, history_changes=False,
+                                     discussion_changes=False)
+                    print(f'\nResults found: {len(self.search_categories_set)}\n')
+            else:
                 self.search_categories_set.clear()
 
-            case _:
-                input(self.INVALID_OPTION_MSG)
-
-        return opt
-
+        return idx
 
 
     def delete_articles_menu(self):
+        clear_terminal()
         print(self.MENU_DELIMITER)
+
         # Show articles in set
         self.print_pages(self.articles_set, time_range=None, history_changes=False, discussion_changes=False)
+        print(f'\nArticles in search set: {len(self.articles_set)}\n')
 
         # Show options
-        print("[1] Select articles you want to delete")
-        print("[2] Return\n")
+        idx = validate_idx(input("Select index of the article you want to delete from search set (0 to return) "),
+                           0, len(self.articles_set))
+        if idx != '0':
+            self.articles_set.pop(int(idx) - 1)
 
-        opt = input(self.CHOOSE_OPTION_MSG)
-        match opt:
-            case '1':
-                idx = input("Select index of the article you want to delete ")
-                idx = validate_idx(idx, 0, len(self.articles_set))
-
-                self.articles_set.pop(idx)
-
-            case '2':
-                None
-
-            case _:
-                input(self.INVALID_OPTION_MSG)
-
-        return opt
+        return idx
 
 
     def crawl_articles(self, search, search_limit, search_type):
         site = pywikibot.Site('es', 'wikipedia')
 
         match search_type:
-            case 1: # Buscar artículos por categoría # Categoría:Eventos políticos en curso
+            case 1:     # Search articles by category Categoría:Eventos políticos en curso
                 pages = pywikibot.Category(site, search).articles(total=search_limit)
-            case _:  # Buscar artículos por titulo
-                pages = site.search(search, total=search_limit)
+            case _:     # Search articles by title
+                pages = site.search(search, total=search_limit, namespaces=0)
 
         return pages
-
 
 
     def print_pages(self, pages, time_range, history_changes: bool, discussion_changes: bool):
@@ -260,7 +284,7 @@ class WikiCrawler(object):
                 start_date = datetime.now().replace(microsecond=0) - timedelta(days=30)
                 end_date = datetime.now().replace(microsecond=0)
 
-        print("[ID] PAGE TITLE --> URL\n")
+        print("[ID] PAGE TITLE --> URL")
         idx = 0
 
         for page in pages:
@@ -279,8 +303,6 @@ class WikiCrawler(object):
                 history_page_revs = self.revisions_within_range(page, start_date, end_date)
                 print(f'\tHistory page changes (from {start_date} to {end_date}): {len(history_page_revs)}')
                 self.print_revs(history_page_revs)
-
-        print(f'\nResults found: {idx}\n')
 
 
     @staticmethod
