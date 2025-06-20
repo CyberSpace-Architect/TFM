@@ -1,4 +1,5 @@
 import heapq
+import os
 import re
 import pywikibot
 import plotext as plt
@@ -265,12 +266,20 @@ class AppController(object):
                 _, edit_war_value = EditWarDetector.is_article_in_edit_war(article, info.start_date, interval, False)
                 info.edit_war_over_time_list.append(edit_war_value)
 
-                xvals.append(interval.strftime("%d/%m/%Y"))
+                xvals.append(interval.strftime("%d/%m/%y"))
                 yvals.append(int(edit_war_value))
 
                 clear_n_lines(1)
                 print(f'\tIntervals with edit war value calculated {i+1}/{len(intervals)}')
 
+            print("\n")
+            clear_n_lines(2)
+
+            size = os.get_terminal_size()
+            width = size.columns
+            height = size.lines
+
+            plt.plot_size(width=width, height=height)
             yticks = [0]
             for i in range(0, 10):
                 yticks.append(round(yvals[-1] - (yvals[-1]/10) * i))
@@ -281,11 +290,8 @@ class AppController(object):
             plt.title("CONFLICT'S TEMPORAL EVOLUTION")
             plt.xlabel("TIME")
             plt.ylabel('EDIT WAR VALUES')
-            plt.bar(xvals, yvals)
+            plt.bar(xvals, yvals, color="blue")
 
-            # 4) Mostrar el valor Y encima de cada barra
-            #for x, y in zip(xvals, yvals):
-            #    plt.text(str(y), x, y + max(yvals)*0.01, alignment="center")
             plt.show()
 
             # Fighting editors ordered from higher to lower activity (based on the nº of mutual reverts made)
