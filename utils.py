@@ -1,11 +1,18 @@
 import re
+import pywikibot
+
 from datetime import datetime, timezone
 from os import system as os_system
 from platform import system as platform_system
 from sys import stdout
 
 
-shared_dict = {}
+# Shared dictionary for multi-purposes (right now only counting printed lines to remove)
+_shared_dict = {}
+
+# Dictionary of articles with associated info (typing without from article_edit_war_info import ArticleEditWarInfo to
+# avoid circular imports)
+_articles_with_edit_war_info_dict: dict[pywikibot.Page, object] = {}
 
 def validate_date_format(date:str, format:str):
     valid_date_format = False
@@ -35,7 +42,7 @@ def validate_idx(idx:str, min_value:int, max_value:int) -> int:
         idx = re.sub(r"\s+", "", idx)
         if not idx.isdigit() or int(idx) < min_value or int(idx) > max_value:
             idx = input("Invalid index, please select a valid one ")
-            shared_dict["lines_to_remove"] = shared_dict.get("lines_to_remove", 0) + 1
+            _shared_dict["lines_to_remove"] = _shared_dict.get("lines_to_remove", 0) + 1
         else:
             valid_idx = True
 
@@ -60,4 +67,4 @@ def clear_terminal():
     else:
         os_system("clear")
 
-    shared_dict["lines_to_remove"] = 0
+    _shared_dict["lines_to_remove"] = 0

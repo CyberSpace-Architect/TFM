@@ -1,9 +1,25 @@
-from WikiCrawler import WikiCrawler
+import os
+import sys
+# Establish path to user-config
+config_dir = os.path.join(os.path.dirname(sys.executable), "config")
+os.environ["PYWIKIBOT_DIR"] = config_dir
+import pywikibot
+import pywikibot.config
+
+from app_controller import AppController
 
 def main():
-    wiki_crawler = WikiCrawler()
+    wiki_crawler = AppController()
 
     wiki_crawler.exec()
+
+def directories():
+    print("Pywikibot está buscando user-config.py en:", pywikibot.config.base_dir)
+    print("PYWIKIBOT_DIR env var:", os.environ.get("PYWIKIBOT_DIR"))
+    print("Current working directory:", os.getcwd())
+    print("pywikibot module path:", os.path.dirname(pywikibot.__file__))
+    print("Pywikibot base dir:", pywikibot.config.get_base_dir())
+    input("Press Enter to continue...")
 
 
 if __name__ == "__main__":
