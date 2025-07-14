@@ -1,8 +1,9 @@
+import urllib
+
 import pywikibot
 from datetime import datetime, timedelta
 
-from utils import datetime_to_iso
-
+from utils import datetime_to_iso, clear_n_lines
 
 
 class WikiCrawler(object):
@@ -41,23 +42,34 @@ class WikiCrawler(object):
 
         for page in pages:
             idx += 1
-            print(f'[{idx}] {page.title()} --> {page.full_url()}')
+
+            if not history_changes and not discussion_changes:
+                print(f'[{idx}] {page.title()} --> {page.full_url()}')
 
             if history_changes:
+                # Build history url
+                title_encoded = urllib.parse.quote(page.title().replace(" ", "_"))
+                history_url = f"https://{cls.language_code}.wikipedia.org/w/index.php?title={title_encoded}&action=history"
+                print(f'{page.title()} --> {history_url}')
+
                 # History revisions page changes within time range
-                history_page_revs = cls.revisions_within_range(page, start_date, end_date)
-                print(f'\tHistory page changes (from {start_date} to {end_date}): {len(history_page_revs)}')
+                print(f'\tRequesting history page contents to Wikipedia...')
+                history_page_revs = cls.get_full_revisions_in_range(page, start_date, end_date)
+                clear_n_lines(1)
+
+                print(f'\tHistory page changes from {start_date.strftime("%d/%m/%Y %H:%M:%S")} to '
+                      f'{end_date.strftime("%d/%m/%Y %H:%M:%S")}: {len(history_page_revs)}')
                 cls.print_revs(history_page_revs)
 
             if discussion_changes:
                 # Discussion page changes within time range
                 discussion_page = page.toggleTalkPage()
-                discussion_page_revs = cls.revisions_within_range(discussion_page, start_date, end_date)
-                print(f'\n\tDiscussion page changes (from {start_date} to {end_date}): {len(discussion_page_revs)}')
-                cls.print_revs(discussion_page_revs)
+                print(f'{discussion_page.title()} --> {page.full_url()}')
+                print("\n" + discussion_page.text)
 
 
-    @staticmethod
+
+    """"@staticmethod
     def revisions_within_range(page, start_date, end_date):
         result_revs = []
 
@@ -83,11 +95,12 @@ class WikiCrawler(object):
                     if rev is not None:
                         rev_date = rev.timestamp
 
-        return result_revs
+        return result_revs"""
 
 
     @classmethod
-    def get_full_revisions_in_range(cls, article: pywikibot.Page, start: datetime, end: datetime) -> list[pywikibot.Page]:
+    def get_full_revisions_in_range(cls, article: pywikibot.Page, start: datetime, end: datetime,
+                                    include_text: bool = False) -> list[pywikibot.Page]:
         # Make sure both datetimes are in UTC and with right format
         start_str = datetime_to_iso(start)
         end_str = datetime_to_iso(end)
@@ -109,11 +122,13 @@ class WikiCrawler(object):
                 "rvdir": "newer",
                 "rvlimit": "max",
                 "rvslots": "main",
-                "rvprop": "ids|timestamp|user|comment|sha1",
+                "rvprop": "ids|timestamp|user|comment|sha1|size",
                 "format": "json"
             }
             if rvcontinue:
                 params["rvcontinue"] = rvcontinue
+            if include_text:
+                params["rvprop"] += "|content"
 
             request = cls.site._request(**params)
             data = request.submit()
@@ -131,7 +146,12 @@ class WikiCrawler(object):
 
     @staticmethod
     def print_revs(rev_array):
-        print("\n\t\tREV ID, TIMESTAMP, USER")
+        print("\nREV ID, TIMESTAMP, USER, SIZE CHANGE, COMMENT")
+
+        prev_size = 0
         for rev in rev_array:
-            print(f'\t\t{rev.revid}, {rev.timestamp}, {rev.user}')
-        print("")
+            size_change = rev['size'] - prev_size
+            prev_size = rev['size']
+            size_change = f'+{size_change}' if size_change > 0 else f'{size_change}'
+            print(f'{rev['revid']}, {rev['timestamp']}, {rev.get('user', 'No user info available')},'
+                  f' {size_change}, "{rev.get('comment', 'No comment included')}"')

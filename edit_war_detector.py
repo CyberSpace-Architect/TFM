@@ -10,12 +10,6 @@ from article_edit_war_info import ArticleEditWarInfo
 class EditWarDetector(object):
     EDIT_WAR_THRESHOLD = 100
 
-    # Me he quedado en que reverts_list y mutual_reverts de esta clase tienen que estar asociados a cada
-    # articulo si no se mezclan, reverts_list ya lo he modificado para el acceso a tupla, pero me parece
-    # muy ofuscado (no se ve lo que representa cada valor de la tupla) por lo que estoy buscando una
-    # forma de acceder usando los nombres reverts_list y mutual_reverts. Vale, tengo que cambiarlo para
-    # que guarde ambas cosas en article_edit_war_info_dict
-
     @classmethod
     def detect_edit_wars_in_set(cls, articles_set: SortedSet[pywikibot.Page], start_date: datetime, end_date: datetime):
         # First, the set is cleared to avoid inconsistencies according to start and end dates from previous searches
@@ -75,13 +69,14 @@ class EditWarDetector(object):
         if print_info: print("\tStarting to analyse each revision within time range for reverts\n")
 
         reverted_users_set = set[str]()
+        users_set = set[str]()
         reverts_list: list[tuple[pywikibot.page._revision, pywikibot.page._revision, set[str]]] = []
         revs_with_revert_idxs_set = set[int]()
 
         # Traverse revisions list looking for reverts (skipping self-reverts) and store them when found
         for i in range(0, len(revs_list)-2):
             rev_i = revs_list[i]
-            rev_i_user = cls.__extract_rev_user(revs_list[i+1])
+            rev_i_user =  cls.__extract_rev_user(revs_list[i])
 
             # Skip this revision if it has already been counted in a previous revert or is part of anti-vandalism bots'
             # activity
@@ -90,8 +85,9 @@ class EditWarDetector(object):
 
             # Add next rev user as possibly reverted user (next rev cannot cause a revert as it is necessary at least
             # an article in between to provoke one, otherwise, this and next revision would be identical)
-
-            reverted_users_set.add(rev_i_user)
+            next_rev_user = cls.__extract_rev_user(revs_list[i+1])
+            if not cls.__is_known_bot(next_rev_user):
+                reverted_users_set.add(next_rev_user)
 
             for j in range(i+2, len(revs_list)-1):
                 rev_j = revs_list[j]
@@ -138,8 +134,10 @@ class EditWarDetector(object):
 
     @staticmethod
     def __is_known_bot(user: str) -> bool:
-        known_bots = {"SeroBOT", "PatruBot", "AVBOT", "AVdiscuBOT", "Botarel", "CVBOT", "CVNBot"}
+        known_bots = {"serobot", "patrubot", "avbot", "avdiscubot", "botarel", "cvbot", "cvnbot"}
+        is_known_bot = user.lower() in known_bots
 
+        return is_known_bot
 
     @staticmethod
     def _find_mutual_reverts(article: pywikibot.Page, reverts_list: list[tuple[pywikibot.page._revision,
@@ -160,7 +158,7 @@ class EditWarDetector(object):
                 for j in range(i + 1, len(reverts_list)):
                     revert_2 = reverts_list[j]
 
-                    if reverted_user == revert_2[1].get("user") and revert_2[2].__contains__(reverser_user):
+                    if reverted_user == revert_2[1].get("user") and reverser_user in revert_2[2]:
                         mutual_reverts_list.append((revert_1, revert_2))
 
             if print_info:

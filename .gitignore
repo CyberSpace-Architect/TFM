@@ -1,5 +1,7 @@
+.idea
+__pycache__
+apicache
+builds-anteriores
+logs
 edit_war_detector_ppdeep.py
 edit_war_detector_texto.py
-__pycache__/EditWarDetectorPPdeep.cpython-313.pyc
-__pycache__/EditWarDetectorTexto.cpython-313.pyc
-builds-anteriores

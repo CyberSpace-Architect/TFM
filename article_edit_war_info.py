@@ -28,10 +28,10 @@ class ArticleEditWarInfo(object):
         self._end_date = end_date
         self._is_in_edit_war = is_in_edit_war
         self._edit_war_over_time_list = [edit_war_value] if edit_war_value is not None else None
-        self.reverts_list = reverts_list if reverts_list is not None else []
-        self.mutual_reverts_list = mutual_reverts_list if mutual_reverts_list is not None else []
-        self.mutual_reversers_dict = mutual_reversers_dict if mutual_reversers_dict is not None else {}
-        self._history_list= WikiCrawler.revisions_within_range(article, start_date, end_date)
+        self._reverts_list = reverts_list if reverts_list is not None else []
+        self._mutual_reverts_list = mutual_reverts_list if mutual_reverts_list is not None else []
+        self._mutual_reversers_dict = mutual_reversers_dict if mutual_reversers_dict is not None else {}
+        self._history_list= WikiCrawler.get_full_revisions_in_range(article, start_date, end_date)
         self._discussion_page = article.toggleTalkPage()
 
 
