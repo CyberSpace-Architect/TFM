@@ -1,25 +1,29 @@
 import re
-import pywikibot
 
 from datetime import datetime, timezone
 from os import system as os_system
 from platform import system as platform_system
 from sys import stdout
 
+from local_page import LocalPage
+from user_info import UserInfo
 
 # Shared dictionary for multi-purposes (right now only counting printed lines to remove)
 _shared_dict = {}
 
 # Dictionary of articles with associated info (typing without from article_edit_war_info import ArticleEditWarInfo to
 # avoid circular imports)
-_articles_with_edit_war_info_dict: dict[pywikibot.Page, object] = {}
+_articles_with_edit_war_info_dict: dict[LocalPage, object] = {}
+
+# Dictionary of users with associated info
+_users_info_dict: dict[str, UserInfo] = {}
 
 def validate_date_format(date:str, format:str):
     valid_date_format = False
 
     if date is not None and date != "":
         try:
-            date = datetime.strptime(date, format)
+            datetime.strptime(date, format)
             valid_date_format = True
         except ValueError:
             valid_date_format = False
@@ -35,12 +39,25 @@ def datetime_to_iso(date: datetime) -> str:
     return date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def validate_idx(idx:str, min_value:int, max_value:int) -> int:
+def validate_idx(idx:str, min_value:int, max_value:int) -> str:
     valid_idx = False
 
     while not valid_idx:
         idx = re.sub(r"\s+", "", idx)
         if not idx.isdigit() or int(idx) < min_value or int(idx) > max_value:
+            idx = input("Invalid index, please select a valid one ")
+            _shared_dict["lines_to_remove"] = _shared_dict.get("lines_to_remove", 0) + 1
+        else:
+            valid_idx = True
+
+    return idx
+
+def validate_idx_in_list(idx:str, valid_values_list:list[int]) -> str:
+    valid_idx = False
+
+    while not valid_idx:
+        idx = re.sub(r"\s+", "", idx)
+        if not idx.isdigit() or int(idx) not in valid_values_list:
             idx = input("Invalid index, please select a valid one ")
             _shared_dict["lines_to_remove"] = _shared_dict.get("lines_to_remove", 0) + 1
         else:
@@ -68,3 +85,4 @@ def clear_terminal():
         os_system("clear")
 
     _shared_dict["lines_to_remove"] = 0
+

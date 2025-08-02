@@ -5,10 +5,14 @@ config_dir = os.path.join(os.path.dirname(sys.executable), "config")
 os.environ["PYWIKIBOT_DIR"] = config_dir
 
 from app_controller import AppController
+from db_utils import sqlite_connection, init_db
 
 def main():
-    wiki_crawler = AppController()
-    wiki_crawler.exec()
+    with sqlite_connection("conflict_watcher.db") as conn:
+        init_db(conn)
+
+        wiki_crawler = AppController(conn)
+        wiki_crawler.exec()
 
 if __name__ == "__main__":
     main()

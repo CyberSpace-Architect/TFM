@@ -1,38 +1,40 @@
-import pywikibot
 from datetime import datetime, timedelta
 
-from wiki_crawler import WikiCrawler
+from local_page import LocalPage
+from local_revision import LocalRevision
 
 class ArticleEditWarInfo(object):
-    _article: pywikibot.Page                 # Referenced article
+    _article: LocalPage                      # Referenced article
     _start_date: datetime                    # Date from which the article is starting to be analyzed
     _end_date: datetime                      # Date from which the article stops to be analyzed
-    _is_in_edit_war: bool                    # Tag indicating if there is an edit war in the article
-    _edit_war_over_time_list: list[int]      # List with edit war values splitting the timeline on equal-length intervals
 
-    # List with all the reverts on the article for the specified # timeline
-    _reverts_list: list[tuple[pywikibot.page._revision, pywikibot.page._revision, set[str]]]
+    # List with edit war values splitting the time range on equal-length intervals
+    _edit_war_over_time_list: list[(int, datetime)]
+
+    # History page (list with all the revisions for the specified time range)
+    _revs_list: list[LocalRevision]
+
+    # List with all the reverts on the article for the specified time range
+    _reverts_list: list[tuple[LocalRevision, LocalRevision, set[str]]]
 
     # List with pairs of mutual reverts (user A reverts user B and B reverts A)
-    _mutual_reverts_list: list[tuple[tuple[pywikibot.page._revision, pywikibot.page._revision, set[str]],
-                         tuple[pywikibot.page._revision, pywikibot.page._revision, set[str]]]]
+    _mutual_reverts_list: list[tuple[tuple[LocalRevision, LocalRevision, set[str]],
+                         tuple[LocalRevision, LocalRevision, set[str]]]]
 
-    _mutual_reversers_dict: dict[str, int]   # Dictionary with the nº of edits for each mutual reverser
-    _history_list: list[pywikibot.page]      # History page (list of revisions)
-    _discussion_page: pywikibot.page         # Discussion page #article.toggleTalkPage()
+    # Dictionary with the nº of mutual reverts made by each mutual reverter on this article and period
+    _mutual_reverters_dict: dict[str, int]
 
 
-    def __init__(self, article, start_date, end_date, is_in_edit_war = None, edit_war_value = None, reverts_list = None, mutual_reverts_list = None, mutual_reversers_dict = None):
+    def __init__(self, article, start_date:datetime, end_date:datetime, edit_war_value:int = None, reverts_list = None,
+                 mutual_reverts_list = None, mutual_reverters_dict = None):
         self._article = article
         self._start_date = start_date
         self._end_date = end_date
-        self._is_in_edit_war = is_in_edit_war
-        self._edit_war_over_time_list = [edit_war_value] if edit_war_value is not None else None
+        self._edit_war_over_time_list = [(edit_war_value, end_date)] if edit_war_value is not None else []
+        self._revs_list = []
         self._reverts_list = reverts_list if reverts_list is not None else []
         self._mutual_reverts_list = mutual_reverts_list if mutual_reverts_list is not None else []
-        self._mutual_reversers_dict = mutual_reversers_dict if mutual_reversers_dict is not None else {}
-        self._history_list= WikiCrawler.get_full_revisions_in_range(article, start_date, end_date)
-        self._discussion_page = article.toggleTalkPage()
+        self._mutual_reverters_dict = mutual_reverters_dict if mutual_reverters_dict is not None else {}
 
 
     @property
@@ -48,12 +50,12 @@ class ArticleEditWarInfo(object):
         return self._end_date
 
     @property
-    def is_in_edit_war(self):
-        return self._is_in_edit_war
-
-    @property
     def edit_war_over_time_list(self):
         return self._edit_war_over_time_list
+
+    @property
+    def revs_list(self):
+        return self._revs_list
 
     @property
     def reverts_list(self):
@@ -64,24 +66,24 @@ class ArticleEditWarInfo(object):
         return self._mutual_reverts_list
 
     @property
-    def mutual_reversers_dict(self):
-        return self._mutual_reversers_dict
+    def mutual_reverters_dict(self):
+        return self._mutual_reverters_dict
 
-    @property
-    def history_list(self):
-        return self._history_list
+    @start_date.setter
+    def start_date(self, value):
+        self._start_date = value
 
-    @property
-    def discussion_page(self):
-        return self._discussion_page
-
-    @is_in_edit_war.setter
-    def is_in_edit_war(self, value):
-        self._is_in_edit_war = value
+    @end_date.setter
+    def end_date(self, value):
+        self._end_date = value
 
     @edit_war_over_time_list.setter
     def edit_war_over_time_list(self, value):
         self._edit_war_over_time_list = value
+
+    @revs_list.setter
+    def revs_list(self, value):
+        self._revs_list = value
 
     @reverts_list.setter
     def reverts_list(self, value):
@@ -91,9 +93,18 @@ class ArticleEditWarInfo(object):
     def mutual_reverts_list(self, value):
         self._mutual_reverts_list = value
 
-    @mutual_reversers_dict.setter
-    def mutual_reversers_dict(self, value):
-        self._mutual_reversers_dict = value
+    @mutual_reverters_dict.setter
+    def mutual_reverters_dict(self, value):
+        self._mutual_reverters_dict = value
+
+
+    def is_in_edit_war(self, edit_war_threshold: int) -> bool:                    # Tag indicating if there is an edit war in the article
+        is_in_edit_war = False
+
+        if self._edit_war_over_time_list[-1][0] > edit_war_threshold:
+            is_in_edit_war = True
+
+        return is_in_edit_war
 
 
     @staticmethod
