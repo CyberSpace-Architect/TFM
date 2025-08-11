@@ -1,11 +1,10 @@
 from typing import Iterable
 
 import pywikibot
-from pywikibot import Page
 
 
 class LocalPage(object):
-    _page: pywikibot.Page                 # Referenced article
+    _page: pywikibot.Page       # Referenced article
     _pageid: int
     _title: str
     _site: str
@@ -36,6 +35,10 @@ class LocalPage(object):
 
     @property
     def page(self):
+        if self._page is None:
+            fam, code = self._site.split(":")
+            self._page = pywikibot.Page(pywikibot.Site(code, fam), self._title)
+
         return self._page
 
     @page.setter
@@ -92,8 +95,6 @@ class LocalPage(object):
 
     @property
     def title(self):
-        title = None
-
         if self._title is None:
             title = self._page.title()
         else:
@@ -153,7 +154,7 @@ class LocalPage(object):
 
     @classmethod
     def init_with_page(cls, page: pywikibot.Page):
-        """ Constructor to build class parameters from pywikibot.Page"""
+        """ Constructor to build class parameters from pywikibot.Page """
         discussion_page = page.toggleTalkPage()
 
         return cls(page.pageid, page.title(), str(page.site), page.namespace().id, page.full_url(), page.content_model,
@@ -161,8 +162,6 @@ class LocalPage(object):
 
 
     def full_url(self):
-        full_url = None
-
         if self.url is None:
             full_url = self.page.full_url()
         else:
@@ -171,7 +170,8 @@ class LocalPage(object):
         return full_url
 
 
-    def categories(self, with_sort_key: bool = False, total: int | None = None, content: bool = False) -> Iterable[Page]:
+    def categories(self, with_sort_key: bool = False, total: int | None = None, content: bool = False) \
+            -> Iterable[pywikibot.Page]:
         categories = []
 
         if self.page is not None:

@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
-from local_page import LocalPage
-from local_revision import LocalRevision
+from app.info_containers.local_page import LocalPage
+from app.info_containers.local_revision import LocalRevision
+
 
 class ArticleEditWarInfo(object):
     _article: LocalPage                      # Referenced article
@@ -98,7 +99,13 @@ class ArticleEditWarInfo(object):
         self._mutual_reverters_dict = value
 
 
-    def is_in_edit_war(self, edit_war_threshold: int) -> bool:                    # Tag indicating if there is an edit war in the article
+    def is_in_edit_war(self, edit_war_threshold: int) -> bool:
+        """
+        Function that works as a tag indicating if there is an edit war in the article
+
+        :param edit_war_threshold:
+        :return: bool
+        """
         is_in_edit_war = False
 
         if self._edit_war_over_time_list[-1][0] > edit_war_threshold:
@@ -109,6 +116,15 @@ class ArticleEditWarInfo(object):
 
     @staticmethod
     def split_time_interval(start_date: datetime, end_date: datetime, n_intervals: int = 10) -> list[datetime]:
+        """
+        Function that splits the time defined within start and end dates into n intervals (10 by default, or less
+        than 10 if there are less than 10 days of difference between start and end dates)
+
+        :param start_date:
+        :param end_date:
+        :param n_intervals:
+        :return: list[datetime]
+        """
         intervals = []
 
         if end_date < start_date:

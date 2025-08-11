@@ -2,7 +2,7 @@ import pywikibot
 
 
 class LocalRevision(object):
-    _revision: pywikibot.page._revision                 # Referenced revision
+    _revision: pywikibot.page._revision     # Referenced revision
     _revid: int
     _article: int
     _timestamp: str

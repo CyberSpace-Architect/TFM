@@ -1,8 +1,9 @@
 from datetime import datetime
 
 
-class UserInfo(object):
+class LocalUser(object):
     _username: str
+    _site: str
     _is_registered: bool
     _is_blocked: bool
     _registration_date: datetime
@@ -14,12 +15,13 @@ class UserInfo(object):
     _network_country: str
     _registrants_info: str
 
-    def __init__(self, username: str, is_registered: bool = None,
+    def __init__(self, username: str, site: str = None, is_registered: bool = None,
                  is_blocked: bool = None, registration_date: datetime = None, edit_count: int = None,
                  asn: str = None, asn_description: str = None, network_address: str = None, network_name: str = None,
                  network_country: str = None, registrants_info: str = None):
 
         self._username = username
+        self._site = site
         self._is_registered = is_registered
         self._is_blocked = is_blocked
         self._registration_date = registration_date
@@ -80,6 +82,14 @@ class UserInfo(object):
         self._username = value
 
     @property
+    def site(self):
+        return self._site
+
+    @site.setter
+    def site(self, value):
+        self.site = value
+
+    @property
     def edit_count(self):
         return self._edit_count
 
@@ -118,8 +128,3 @@ class UserInfo(object):
     @network_address.setter
     def network_address(self, value):
         self._network_address = value
-
-
-
-
-

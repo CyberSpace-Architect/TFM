@@ -2,13 +2,13 @@ from cx_Freeze import setup, Executable
 
 icon_path = "media/icon.ico"
 families_path = r"D:\Program Files\PyCharm 2024.3.2\workspace\Conflict Watcher\.venv\Lib\site-packages\pywikibot\families"
-main_script = "main.py"
+main_script = "app/main.py"
 
 build_exe_options = {
     "packages": ["pywikibot"],
     "include_files": [
         (families_path, "config/families"),
-        ("config", "config"),
+        ("build_config", "config"),
     ],
 }
 

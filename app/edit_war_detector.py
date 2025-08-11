@@ -1,55 +1,66 @@
 import pywikibot
+
 from datetime import datetime, timedelta
 from typing import Any
-
 from sortedcontainers import SortedSet
 
-from local_revision import LocalRevision
-from utils import clear_n_lines, _articles_with_edit_war_info_dict
-from wiki_crawler import WikiCrawler
-from article_edit_war_info import ArticleEditWarInfo
-from local_page import LocalPage
+from app.info_containers.local_revision import LocalRevision
+from app.utils.helpers import clear_n_lines
+from app.utils.helpers import Singleton
+from app.wiki_crawler import WikiCrawler
+from app.info_containers.article_edit_war_info import ArticleEditWarInfo
+from app.info_containers.local_page import LocalPage
 
 class EditWarDetector(object):
     EDIT_WAR_THRESHOLD = 100
 
     @classmethod
     def detect_edit_wars_in_set(cls, articles_set: SortedSet[LocalPage], start_date: datetime, end_date: datetime):
-
         print("\n===> Starting detection of edit wars...")
+        articles_with_edit_war_info_dict = Singleton().articles_with_edit_war_info_dict
+
         for local_page in articles_set:
             print(f"\nAnalyzing article {local_page.title}")
-            info: ArticleEditWarInfo = _articles_with_edit_war_info_dict.get(local_page)
+            info = articles_with_edit_war_info_dict.get(local_page)
 
             if info is None or not info.revs_list:
                 # No previous data for this article, so all revisions have to be retrieved from Wikipedia
-                _articles_with_edit_war_info_dict[local_page] = ArticleEditWarInfo(local_page.page, start_date, end_date)
-                info = _articles_with_edit_war_info_dict[local_page]
+                articles_with_edit_war_info_dict[local_page] = ArticleEditWarInfo(local_page, start_date, end_date)
+                info = articles_with_edit_war_info_dict[local_page]
 
                 # Get revisions from Wikipedia
                 print("\tNo previous data stored for this article, requesting revisions to Wikipedia")
-                info.revs_list = WikiCrawler.get_full_revisions_in_range(WikiCrawler.site, local_page.page, start_date, end_date)
+                fam, code = local_page.site.split(":")
+                site = pywikibot.Site(code, fam)
+                info.revs_list = WikiCrawler.get_full_revisions_in_range(site, local_page.page, start_date, end_date)
                 print(f"\t\tRevisions received, number of revisions within time range: {len(info.revs_list)}")
             else:
                 cls.update_revisions_to_new_time_range(local_page, start_date, end_date)
-                info: ArticleEditWarInfo = _articles_with_edit_war_info_dict[local_page]
+                info: ArticleEditWarInfo = articles_with_edit_war_info_dict[local_page]
 
-            (info.reverts_list, info.mutual_reverts_list, info.mutual_reverters_dict,
+                # Clear previous info about mutual reverts as their data do not correspond anymore to the time range
+                if info.mutual_reverters_dict:
+                    info.mutual_reverters_dict.clear()
+
+            (info.reverts_list, info.mutual_reverts_list,
                 edit_war_value) = cls.is_article_in_edit_war(info.revs_list, True)
 
+            # List is populated with the value corresponding to the full time range
             info.edit_war_over_time_list = [(edit_war_value, end_date)]
+
 
     @classmethod
     def update_revisions_to_new_time_range(cls, local_page: LocalPage, start_date: datetime, end_date: datetime):
 
         # Check if the time range has changed and new revisions have to be retrieved from Wikipedia
-        info: ArticleEditWarInfo = _articles_with_edit_war_info_dict[local_page]
+        info = Singleton().articles_with_edit_war_info_dict[local_page]
 
+        # Perform appropriate actions depending on the new time range compared to the old one
         if abs(start_date - info.start_date) >= timedelta(days=1) or abs(end_date - info.end_date) >= timedelta(days=1):
-            # Perform appropriate actions depending on the new time range compared to the old one
-            print("\tPrevious data stored for this article, but time range has been changed (at least "
-                  "\n\ta day of difference between start or end dates respect to previous ones),"
-                  "\n\tadjusting revisions to new range... ")
+
+            print("\tPrevious data stored for this article, but time range has been changed (at least a day of "
+                   "difference between start or end dates respect to previous ones), adjusting revisions to new "
+                   "range... ")
 
             # Retrieve page from Wikipedia to be able to retrieve missing revisions
             if not local_page.page:
@@ -61,34 +72,37 @@ class EditWarDetector(object):
             n_revs_deleted = 0
 
             if start_date < info.start_date:
-                new_revs_list = WikiCrawler.get_full_revisions_in_range(WikiCrawler.site, local_page.page, start_date,
+                fam, code = local_page.site.split(":")
+                site = pywikibot.Site(code, fam)
+
+                new_revs_list = WikiCrawler.get_full_revisions_in_range(site, local_page.page, start_date,
                                                                         info.start_date)
                 n_revs_received += len(new_revs_list)
                 info.revs_list[:0] = new_revs_list
             else:
-                start_date_reached = False
-
-                while not start_date_reached:
-                    rev_date = info.revs_list[0].timestamp
+                for rev in info.revs_list[:]:
+                    rev_date = rev.timestamp
 
                     if datetime.strptime(rev_date, "%Y-%m-%dT%H:%M:%SZ") > start_date:
-                        start_date_reached = True
+                        break
                     else:
                         info.revs_list.pop(0)
                         n_revs_deleted += 1
+
             if info.end_date < end_date:
-                new_revs_list = WikiCrawler.get_full_revisions_in_range(WikiCrawler.site, local_page.page, info.end_date,
+                fam, code = local_page.site.split(":")
+                site = pywikibot.Site(code, fam)
+
+                new_revs_list = WikiCrawler.get_full_revisions_in_range(site, local_page.page, info.end_date,
                                                                         end_date)
                 n_revs_received += len(new_revs_list)
                 info.revs_list.extend(new_revs_list)
             else:
-                end_date_reached = False
-
-                while not end_date_reached:
-                    rev_date = info.revs_list[-1].timestamp
+                for rev in reversed(info.revs_list[:]):
+                    rev_date = rev.timestamp
 
                     if datetime.strptime(rev_date, "%Y-%m-%dT%H:%M:%SZ") < end_date:
-                        end_date_reached = True
+                        break
                     else:
                         info.revs_list.pop(-1)
                         n_revs_deleted += 1
@@ -98,9 +112,9 @@ class EditWarDetector(object):
             print(f"\t\tTotal number of revisions within new time range: {len(info.revs_list)}")
 
         else:
-            print("\tPrevious data stored for this article and time range has not changed"
-                  "\n\t(less than a day of difference between start and end dates compared to previous ones),"
-                  "\n\tno missing revisions needed to be requested to Wikipedia")
+            print("\tPrevious data stored for this article and time range has not changed (less than a day of "
+                   "difference between start and end dates compared to previous ones), no missing revisions needed "
+                   "to be requested to Wikipedia")
 
         # Save new time range
         info.start_date = start_date
@@ -112,18 +126,18 @@ class EditWarDetector(object):
         edit_war_tag = False
 
         # Find and store all reverts
-        reverts_list = cls._find_reverts(revs_list, print_info)
+        reverts_list = cls.__find_reverts(revs_list, print_info)
 
         # Filter reverts and keep only mutual ones
-        mutual_reverts_list = cls._find_mutual_reverts(reverts_list, print_info)
+        mutual_reverts_list = cls.__find_mutual_reverts(reverts_list, print_info)
 
         # Calculate Nr value (min of nº edits) of each pair of mutual reverters from mutual reverts list,
         # a dictionary with the nº of edits for each mutual reverters is retrieved too
-        nr_values_list, mutual_reverters_dict = cls.__calculate_nr_values(mutual_reverts_list, revs_list)
+        nr_values_list, mutual_reverters_edit_count_dict = cls.__calculate_raw_m_values(mutual_reverts_list, revs_list)
 
         # Calculate E value as the total number of mutual reverters (length of mutual reverters' dict - 1 to skip max
         # value deleted from nr_values_list)
-        n_mutual_reverters = len(mutual_reverters_dict) - 1
+        n_mutual_reverters = len(mutual_reverters_edit_count_dict) - 1
 
         # Calculate edit_war value as the sum of Nr values multiplied by the E value
         edit_war_value = cls.__calculate_edit_war_value(n_mutual_reverters, nr_values_list)
@@ -135,11 +149,11 @@ class EditWarDetector(object):
         if print_info: print(f"Analysis finished, article with edit war (value > {cls.EDIT_WAR_THRESHOLD})?: {edit_war_tag} "
                              f"(edit war value: {edit_war_value})")
 
-        return reverts_list, mutual_reverts_list, mutual_reverters_dict, edit_war_value
+        return reverts_list, mutual_reverts_list, edit_war_value
 
 
     @classmethod
-    def _find_reverts(cls, revs_list: list[LocalRevision], print_info: bool) \
+    def __find_reverts(cls, revs_list: list[LocalRevision], print_info: bool) \
             -> list[tuple[LocalRevision, LocalRevision, set[str]]]:
         if print_info: print("\tStarting to analyse each revision within time range for reverts\n")
 
@@ -196,6 +210,7 @@ class EditWarDetector(object):
 
         return reverts_list
 
+
     @staticmethod
     def __is_known_bot(user: str) -> bool:
         known_bots = {"serobot", "patrubot", "avbot", "avdiscubot", "botarel", "cvbot", "cvnbot"}
@@ -203,9 +218,10 @@ class EditWarDetector(object):
 
         return is_known_bot
 
+
     @staticmethod
-    def _find_mutual_reverts(reverts_list: list[tuple[LocalRevision, LocalRevision, set[str]]],
-                             print_info: bool) -> list[tuple[tuple[LocalRevision, LocalRevision, set[str]],
+    def __find_mutual_reverts(reverts_list: list[tuple[LocalRevision, LocalRevision, set[str]]],
+                              print_info: bool) -> list[tuple[tuple[LocalRevision, LocalRevision, set[str]],
                              tuple[LocalRevision, LocalRevision, set[str]]]]:
         if print_info:
             print("\tFiltering reverts keeping mutual ones\n")
@@ -234,7 +250,7 @@ class EditWarDetector(object):
 
 
     @classmethod
-    def __calculate_nr_values(cls, mutual_reverts_list: list[tuple[tuple[LocalRevision, LocalRevision, set[str]],
+    def __calculate_raw_m_values(cls, mutual_reverts_list: list[tuple[tuple[LocalRevision, LocalRevision, set[str]],
                               tuple[LocalRevision, LocalRevision, set[str]]]], revs_list: list[LocalRevision]) \
                               -> tuple[list[int], dict[str, int]]:
         # Traverse mutual reverts list calculating the Nr value for each pair of mutual reverters
@@ -243,20 +259,20 @@ class EditWarDetector(object):
         max_nr = 0
         idx_max_nr = 0
         nr_values_list: list[int] = []
-        mutual_reverters_dict: dict[str, int] = {}
+        mutual_reverters_edit_count_dict: dict[str, int] = {}
 
         for mutual_reverts_tuple in mutual_reverts_list:
             user_i = mutual_reverts_tuple[0][1].user
             user_j = mutual_reverts_tuple[1][1].user
 
             # Count n_edits of user_i and user_j, if we have not stored already their edits number
-            if mutual_reverters_dict.get(user_i) is None:
-                mutual_reverters_dict[user_i] = cls._count_user_edits(user_i, revs_list)
-            n_edits_i = mutual_reverters_dict[user_i]
+            if mutual_reverters_edit_count_dict.get(user_i) is None:
+                mutual_reverters_edit_count_dict[user_i] = cls._count_user_edits(user_i, revs_list)
+            n_edits_i = mutual_reverters_edit_count_dict[user_i]
 
-            if mutual_reverters_dict.get(user_j) is None:
-                mutual_reverters_dict[user_j] = cls._count_user_edits(user_j, revs_list)
-            n_edits_j = mutual_reverters_dict[user_j]
+            if mutual_reverters_edit_count_dict.get(user_j) is None:
+                mutual_reverters_edit_count_dict[user_j] = cls._count_user_edits(user_j, revs_list)
+            n_edits_j = mutual_reverters_edit_count_dict[user_j]
 
             # Calculate Nr value for this mutual revert
             nr_value = min(n_edits_i, n_edits_j)
@@ -271,7 +287,7 @@ class EditWarDetector(object):
         if len(nr_values_list) > 0:
             nr_values_list.pop(idx_max_nr)
 
-        return nr_values_list, mutual_reverters_dict
+        return nr_values_list, mutual_reverters_edit_count_dict
 
 
     @staticmethod
@@ -287,7 +303,6 @@ class EditWarDetector(object):
 
     @staticmethod
     def __calculate_edit_war_value(n_mutual_reverters: int, nr_values_list: list[int]) -> int:
-
         edit_war_value = 0
 
         for nr_value in nr_values_list:
@@ -299,10 +314,12 @@ class EditWarDetector(object):
 
 
     @classmethod
-    def print_pages_with_tags(cls, articles_with_edit_war_info_dict: dict[LocalPage, ArticleEditWarInfo]):
+    def print_pages_with_tags(cls, articles_with_edit_war_info_dict: dict[LocalPage, ArticleEditWarInfo]) \
+                              -> dict[int, LocalPage]:
         print("[ID] PAGE TITLE --> URL --> EDIT_WAR")
         i = 0
         n_edit_wars = 0
+        ids_dict: dict[int, LocalPage] = {}
 
         for i, (article, article_info) in enumerate(articles_with_edit_war_info_dict.items(), start=1):
             value = article_info.edit_war_over_time_list[-1][0]
@@ -313,4 +330,8 @@ class EditWarDetector(object):
             print(f'[{i}] {article.title} --> {article.full_url()} --> {tag} '
                   f'({value}/{cls.EDIT_WAR_THRESHOLD})')
 
+            ids_dict[i] = article
+
         print(f'\nArticles analyzed: {i} \nArticles with edit war: {n_edit_wars}')
+
+        return ids_dict
