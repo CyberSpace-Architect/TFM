@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import sys
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -17,7 +18,8 @@ CREATE_TABLE_SQL_DICT: dict[str, str] = {
     "sessions" : """CREATE TABLE IF NOT EXISTS sessions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL,
-                        timestamp TEXT NOT NULL
+                        timestamp TEXT NOT NULL,
+                        monitored INTEGER
                     );
     """,
     "users" : """CREATE TABLE IF NOT EXISTS users (
@@ -72,6 +74,7 @@ CREATE_TABLE_SQL_DICT: dict[str, str] = {
                                           article INTEGER NOT NULL,
                                           start_date TEXT NOT NULL,
                                           end_date TEXT NOT NULL,
+                                          edit_war_notified INTEGER,
                                           FOREIGN KEY (article) REFERENCES articles(id) ON DELETE CASCADE
                                     ); 
     """,
@@ -153,7 +156,9 @@ def init_db(conn: Connection):
     # Create and index over user reference, since no cascade deletion occurs in user
     conn.execute("CREATE INDEX IF NOT EXISTS revision_user_idx ON revisions(user);")
 
-    input("\nDatabase mounted, press Enter to continue ")
+    # Only use input if a terminal is being used (automatic execution does not and could get blocked)
+    if sys.stdin.isatty():
+        input("\nDatabase mounted, press Enter to continue ")
 
 
 def reset_db(conn: Connection):
@@ -226,8 +231,8 @@ def add_to_db_table(conn: Connection, table: str, column_names: str, item: tuple
 
 
 def fetch_items_from_db(conn: Connection, table: str, where_clause: str = '?=?', where_values: list[str] = None,
-                        in_clause:bool = False, additional_where_clauses:list[str] = None,
-                        additional_where_values:list[list[str]] = None) -> list | None:
+                        in_clause: bool = False, additional_where_clauses: list[str] = None,
+                        additional_where_values: list[list[str]] = None) -> list | None:
 
     # By default, WHERE part of the sentence is 1=1 to retrieve all contents
     if where_values is None:
@@ -303,7 +308,7 @@ def print_query_contents(description: Tuple[Any], rows: list, table:str = None) 
 
     # 1º Get terminal size to accommodate columns
     size = os.get_terminal_size()
-    spaces_size = len(column_names)
+    spaces_size = len(column_names) - 1
     max_size = int((size.columns - spaces_size) / len(column_names))
     free_space = 0
 
@@ -313,13 +318,16 @@ def print_query_contents(description: Tuple[Any], rows: list, table:str = None) 
 
         # If the space required is less than the one assigned to the column the leftover space is added to the free space
         if formated_column_length <= max_size:
-            free_space += max_size - formated_column_length
-            columns_max_length_dict[i] = formated_column_length
+            space_used = max(int(max_size/2), formated_column_length)       # Half the maximum size as minimum
+            free_space += max_size - space_used
+            columns_max_length_dict[i] = space_used
+
         # If it is bigger and there's sufficient free space accumulated from previous columns, part of it is
         # used to accommodate this column
         elif formated_column_length < free_space:
             free_space -= formated_column_length - max_size
             columns_max_length_dict[i] = formated_column_length
+
         # Otherwise, half of the free space available is used on this column trying to accommodate as best as possible,
         # but avoiding wasting all the free space on a single column
         else:
@@ -328,17 +336,14 @@ def print_query_contents(description: Tuple[Any], rows: list, table:str = None) 
 
     # 3º Iterate over each row of the query contents trying to display it as best as possible as has been done with columns
     for row in rows:
-        free_space = 0  # For each column free space is reset
+        # For each row free space is reset to the one already used by previous rows
+        free_space = max_size * len(column_names) - sum(columns_max_length_dict.values())
 
         for i, value in enumerate(row):
             # Value will be formatted for displaying, so length is also counted after formatting it
             formated_value_length = len(re.sub(r'[\t\n\r]+', '', str(value).rstrip()))
             # Length assigned to column is retrieved from dict
             column_length = columns_max_length_dict[i]
-
-            # Space available is the result of the accumulated free space minus the size assigned to this column compared
-            # to the initial max size
-            free_space = free_space + (max_size - column_length)
 
             # If value length is bigger than column size we try to accommodate it
             if formated_value_length > column_length:
@@ -347,10 +352,11 @@ def print_query_contents(description: Tuple[Any], rows: list, table:str = None) 
                 if formated_value_length < free_space:
                     free_space -= formated_value_length - column_length
                     columns_max_length_dict[i] = formated_value_length
+
                 # Otherwise, half of the free space available is used on this column trying to accommodate as best as
                 # possible, but avoiding wasting all the free space on a single column
                 else:
-                    columns_max_length_dict[i] += int(free_space/2)
+                    columns_max_length_dict[i] += int(free_space/2) if free_space%2 == 0 else int(free_space/2)+1
                     free_space = int(free_space/2)
 
     # Once all columns have their sizes as accommodated as possible, line with the column headers (names) is printed
@@ -507,34 +513,6 @@ def add_or_update_if_exists(conn: Connection, table: str, column_names: str, whe
     return rowid
 
 
-def is_safe_select(query: str) -> bool:
-    """
-    Function to check that an arbitrary SELECT query is safe
-
-    :param query:
-    :return: bool
-    """
-    is_safe = False
-
-    # Normalize query (lowercase and remove blank space)
-    normalized_query = re.sub(r"\s+", " ", query.strip().lower())
-
-    # Check that it is a select query
-    if normalized_query.startswith("select"):
-        dangerous_keywords = ["insert", "update", "delete", "drop", "alter", "create",
-                              "pragma", "attach", "detach", "load_extension", ";", "--", "#",
-                              "writefile", "exec", "replace", "vacuum", "sqlite_master", "sqlite_sequence"]
-
-        # Check that no dangerous keywords are included in the query
-        for keyword in dangerous_keywords:
-            if keyword in normalized_query:
-                break
-        else:
-            is_safe = True
-
-    return is_safe
-
-
 def sanitize_and_execute_select(conn: Connection, query: str) -> (Tuple[Any], list[Any]):
     """
     Function to sanitize an arbitrary SELECT query and then execute it
@@ -575,6 +553,35 @@ def sanitize_and_execute_select(conn: Connection, query: str) -> (Tuple[Any], li
         cursor.close()
 
     return return_tuple
+
+
+def is_safe_select(query: str) -> bool:
+    """
+    Function to check that an arbitrary SELECT query is safe
+
+    :param query:
+    :return: bool
+    """
+    is_safe = False
+
+    # Normalize query (lowercase and remove blank space)
+    normalized_query = re.sub(r"\s+", " ", query.strip().lower())
+
+    # Check that it is a select query
+    if normalized_query.startswith("select"):
+        dangerous_keywords = ["insert", "update", "delete", "drop", "alter", "create",
+                              "pragma", "attach", "detach", "load_extension", ";", "--", "#",
+                              "writefile", "exec", "replace", "vacuum", "sqlite_master", "sqlite_sequence"]
+
+        # Check that no dangerous keywords are included in the query
+        for keyword in dangerous_keywords:
+            if keyword in normalized_query:
+                break
+        else:
+            is_safe = True
+
+    return is_safe
+
 
 
 def delete_non_referenced_users(conn: Connection):
@@ -775,36 +782,39 @@ def create_temp_session_db(orig_db_conn: Connection, temp_db_conn, session: list
 
 """ Functions to save data for each table (checking safely if the entry already exists in which case it is updated) """
 
-def save_session_data(conn: Connection) -> (int | None, bool):
-    print("\n")
-    print_db_table(conn, "sessions")
-
-    session_id = None
+def save_session_data(conn: Connection, session_id: str = None) -> (int | None, bool):
     session_saved = False
     session_overwritten = False
 
-    while not session_saved:
-        name = input("\nPlease, write a name to save this session ")
+    if not session_id:
+        while not session_saved:
+            name = input("\nPlease, write a name to save this session ")
 
-        sessions = fetch_items_from_db(conn, "sessions", where_clause="name=?", where_values=[name])
-        if sessions:
-            question = "A session with this name already exists, do you want to overwrite it? "
-            answer = ask_yes_or_no_question(question)
+            sessions = fetch_items_from_db(conn, "sessions", where_clause="name=?", where_values=[name])
+            if sessions:
+                question = "A session with this name already exists, do you want to overwrite it? "
+                answer = ask_yes_or_no_question(question)
 
-            if answer:
-                timestamp = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
-                session_id = sessions[0][0]  # rowid of first session in the list
+                if answer:
+                    timestamp = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+                    session_id = sessions[0][0]  # rowid of first session in the list
 
-                update_db_table(conn, "sessions", "name=?, timestamp=?",
-                                [name, timestamp], session_id)
-                session_overwritten = True
+                    update_db_table(conn, "sessions", "timestamp=?",
+                                    [timestamp], session_id)
+                    session_overwritten = True
+                    session_saved = True
+
+                clear_n_lines(1)
+            else:
+                session_id = add_to_db_table(conn, "sessions", "name, timestamp, monitored",
+                                             (name, datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S"), False))
                 session_saved = True
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
 
-            clear_n_lines(1)
-        else:
-            session_id = add_to_db_table(conn, "sessions", "name, timestamp",
-                                         (name, datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")))
-            session_saved = True
+        update_db_table(conn, "sessions", "timestamp=?",
+                        [timestamp], session_id)
+        session_overwritten = True
 
     return session_id, session_overwritten
 
@@ -838,13 +848,14 @@ def save_period_data(conn: Connection, articles_ids_dict: dict[int, int], articl
     article_id = articles_ids_dict[article.pageid]
     start_date_str = datetime_to_iso(info.start_date)
     end_date_str = datetime_to_iso(info.end_date)
+    edit_war_notified = info.edit_war_notified
 
-    column_names = "article, start_date, end_date"
+    column_names = "article, start_date, end_date, edit_war_notified"
     where_clause = "article=? AND end_date=?"
     where_values = [article_id, end_date_str]
-    set_clause = "article=?, start_date=?, end_date=?"
-    set_values = [article_id, start_date_str, end_date_str]
-    item = (article_id, start_date_str, end_date_str)
+    set_clause = "article=?, start_date=?, end_date=?, edit_war_notified=?"
+    set_values = [article_id, start_date_str, end_date_str, edit_war_notified]
+    item = (article_id, start_date_str, end_date_str, edit_war_notified)
 
     period_id = add_or_update_if_exists(conn, "edit_war_analysis_periods", column_names, where_clause, where_values,
                                         set_clause, set_values, item)

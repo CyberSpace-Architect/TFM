@@ -1,8 +1,11 @@
 .idea
+.venv
 apicache
 logs
+monitoring
 conflict_watcher.db
 throttle.ctrl
 app/__pycache__
 app/utils/__pycache__
 app/info_containers/__pycache__
+

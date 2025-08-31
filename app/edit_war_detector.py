@@ -5,7 +5,7 @@ from typing import Any
 from sortedcontainers import SortedSet
 
 from app.info_containers.local_revision import LocalRevision
-from app.utils.helpers import clear_n_lines
+from app.utils.helpers import clear_n_lines, generate_system_notification
 from app.utils.helpers import Singleton
 from app.wiki_crawler import WikiCrawler
 from app.info_containers.article_edit_war_info import ArticleEditWarInfo
@@ -335,3 +335,30 @@ class EditWarDetector(object):
         print(f'\nArticles analyzed: {i} \nArticles with edit war: {n_edit_wars}')
 
         return ids_dict
+
+
+    @classmethod
+    def detect_edit_wars_in_monitored_articles(cls, articles_set: SortedSet[LocalPage], start_date: datetime,
+                                               end_date: datetime, session_id: str) -> None:
+        # Detect edit wars in set
+        cls.detect_edit_wars_in_set(articles_set, start_date, end_date)
+
+        # Check if any article surpasses threshold
+        singleton = Singleton()
+        edit_wars_to_notify = 0
+
+        for info in singleton.articles_with_edit_war_info_dict.values():
+            # Update end_date info to the one of this automatic analysis (updated one)
+            info.end_date = end_date
+
+            if info.edit_war_over_time_list[0][0] > cls.EDIT_WAR_THRESHOLD and info.edit_war_notified is False:
+                edit_wars_to_notify += 1
+                info.edit_war_notified = True
+
+        # Create notification if any edit war is detected
+        if edit_wars_to_notify > 0:
+            generate_system_notification(app="Conflict Watcher",
+                                         title="Edit wars detected",
+                                         msg = (f'New edit wars detected in {edit_wars_to_notify} monitored articles '
+                                                f'during last analysis. Check session {session_id} for further '
+                                                f'details.'))

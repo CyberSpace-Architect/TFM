@@ -8,6 +8,7 @@ class ArticleEditWarInfo(object):
     _article: LocalPage                      # Referenced article
     _start_date: datetime                    # Date from which the article is starting to be analyzed
     _end_date: datetime                      # Date from which the article stops to be analyzed
+    _edit_war_notified: bool              # If an edit war has been detected and notified by the monitoring task
 
     # List with edit war values splitting the time range on equal-length intervals
     _edit_war_over_time_list: list[(int, datetime)]
@@ -25,18 +26,18 @@ class ArticleEditWarInfo(object):
     # Dictionary with the nº of mutual reverts made by each mutual reverter on this article and period
     _mutual_reverters_dict: dict[str, int]
 
-
-    def __init__(self, article, start_date:datetime, end_date:datetime, edit_war_value:int = None, reverts_list = None,
-                 mutual_reverts_list = None, mutual_reverters_dict = None):
+    def __init__(self, article: LocalPage, start_date: datetime, end_date: datetime, edit_war_value: int = None,
+                 edit_war_notified: bool = None, reverts_list: list = None,
+                 mutual_reverts_list: list = None, mutual_reverters_dict: list = None):
         self._article = article
         self._start_date = start_date
         self._end_date = end_date
+        self._edit_war_notified = edit_war_notified if edit_war_notified is not None else False
         self._edit_war_over_time_list = [(edit_war_value, end_date)] if edit_war_value is not None else []
         self._revs_list = []
         self._reverts_list = reverts_list if reverts_list is not None else []
         self._mutual_reverts_list = mutual_reverts_list if mutual_reverts_list is not None else []
         self._mutual_reverters_dict = mutual_reverters_dict if mutual_reverters_dict is not None else {}
-
 
     @property
     def article(self):
@@ -49,6 +50,10 @@ class ArticleEditWarInfo(object):
     @property
     def end_date(self):
         return self._end_date
+
+    @property
+    def edit_war_notified(self):
+        return self._edit_war_notified
 
     @property
     def edit_war_over_time_list(self):
@@ -77,6 +82,10 @@ class ArticleEditWarInfo(object):
     @end_date.setter
     def end_date(self, value):
         self._end_date = value
+
+    @edit_war_notified.setter
+    def edit_war_notified(self, value):
+        self._edit_war_notified = value
 
     @edit_war_over_time_list.setter
     def edit_war_over_time_list(self, value):

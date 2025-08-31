@@ -33,7 +33,7 @@ class Family(family.SubdomainFamily, family.WikimediaFamily):
         'ja', 'jv', 'ka', 'kn', 'ko', 'la', 'li', 'lij', 'lt', 'mk', 'ml',
         'mr', 'ms', 'mul', 'my', 'nap', 'nl', 'no', 'or', 'pa', 'pl', 'pms',
         'pt', 'ro', 'ru', 'sa', 'sah', 'sk', 'sl', 'sr', 'su', 'sv', 'ta',
-        'tcy', 'te', 'th', 'tr', 'uk', 'vec', 'vi', 'wa', 'yi', 'zh',
+        'tcy', 'te', 'th', 'tl', 'tr', 'uk', 'vec', 'vi', 'wa', 'yi', 'zh',
         'zh-min-nan',
     }
 
@@ -56,7 +56,7 @@ class Family(family.SubdomainFamily, family.WikimediaFamily):
     def langs(cls):
         cls.langs = super().langs
         cls.langs['mul'] = cls.domain
-        cls.langs['beta'] = 'en.wikisource.beta.wmflabs.org'
+        cls.langs['beta'] = 'en.wikisource.beta.wmcloud.org'
         return cls.langs
 
     # Need to explicitly inject the beta domain

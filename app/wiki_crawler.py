@@ -18,13 +18,13 @@ class WikiCrawler(object):
 
 
     @classmethod
-    def set_language_code(cls, language_code):
+    def set_language_code(cls, language_code: str):
         cls.language_code = language_code
         cls.site = pywikibot.Site(language_code, 'wikipedia')
 
 
     @classmethod
-    def crawl_articles(cls, search, search_limit, search_type):
+    def crawl_articles(cls, search: str, search_limit: int, search_type: int):
         match search_type:
             case 1:  # Search articles by category
                 pages = pywikibot.Category(cls.site, search).articles(total=search_limit)
@@ -171,11 +171,11 @@ class WikiCrawler(object):
 
 
     @staticmethod
-    def print_revs(local_revs_array):
+    def print_revs(local_revs_list: list[LocalRevision]):
         print("\nREV ID, TIMESTAMP, USER, SIZE CHANGE, COMMENT")
 
         prev_size = 0
-        for local_rev in local_revs_array:
+        for local_rev in local_revs_list:
             size_change = local_rev.size - prev_size
             prev_size = local_rev.size
             size_change = f'+{size_change}' if size_change > 0 else f'{size_change}'

@@ -170,7 +170,7 @@ class LocalPage(object):
         return full_url
 
 
-    def categories(self, with_sort_key: bool = False, total: int | None = None, content: bool = False) \
+    def categories(self, with_sort_key: bool = False, total: int = None, content: bool = False) \
             -> Iterable[pywikibot.Page]:
         categories = []
 

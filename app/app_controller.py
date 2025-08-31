@@ -3,7 +3,9 @@ import os
 import pprint
 import re
 import logging
-from typing import Tuple
+import sys
+from pathlib import Path
+
 import pywikibot
 
 logging.getLogger("pywikibot.api").setLevel(logging.ERROR)
@@ -17,27 +19,28 @@ from sqlite3 import Connection
 from app.wiki_crawler import WikiCrawler
 from app.edit_war_detector import EditWarDetector
 from app.info_containers.article_edit_war_info import ArticleEditWarInfo
-from app.utils.helpers import Singleton
+from app.utils.helpers import Singleton, create_scheduled_task, delete_scheduled_task
 from app.info_containers.local_page import LocalPage
 from app.info_containers.local_revision import LocalRevision
 from app.info_containers.local_user import LocalUser
 from app.utils.helpers import (validate_idx, ask_valid_date, print_delim_line, clear_terminal, clear_n_lines,
                            validate_idx_in_list, datetime_to_iso, ask_yes_or_no_question, plot_graph)
 from app.utils.db_utils import (reset_db, fetch_items_from_db, print_db_table, delete_from_db_table,
-                            save_session_data, save_article_data, save_period_data, save_edit_war_value,
-                            save_user_data, save_revision_data, save_revert_data, save_reverted_user_pair_data,
-                            save_mutual_revert_data, save_mutual_reverters_activity, sanitize_and_execute_select,
-                            print_query_contents, sqlite_connection, create_temp_session_db, delete_non_referenced_users)
+                                save_session_data, save_article_data, save_period_data, save_edit_war_value,
+                                save_user_data, save_revision_data, save_revert_data, save_reverted_user_pair_data,
+                                save_mutual_revert_data, save_mutual_reverters_activity, sanitize_and_execute_select,
+                                print_query_contents, sqlite_connection, create_temp_session_db,
+                                delete_non_referenced_users, update_db_table)
 
 
 class AppController(object):
-    CHOOSE_OPTION_MSG = "Select an option "
-    INVALID_OPTION_MSG = "Invalid option, please select one of the list. (Enter to continue) "
-    EMPTY_SET_MSG = "Search set empty, please first search some articles with option 1. (Enter to continue) "
-    EMPTY_SESSIONS_MSG = "No sessions found in database, please save one first. (Enter to continue)"
-    CONTINUE_MSG = "\nPress Enter to continue... "
-    SIMPLE_DATE_FORMAT = "%d/%m/%Y"
-    ISO_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+    __CHOOSE_OPTION_MSG = "Select an option "
+    __INVALID_OPTION_MSG = "Invalid option, please select one of the list. (Enter to continue) "
+    __EMPTY_SET_MSG = "Search set empty, please first search some articles with option 1. (Enter to continue) "
+    __EMPTY_SESSIONS_MSG = "No sessions found in database, please save one first. (Enter to continue)"
+    __CONTINUE_MSG = "\nPress Enter to continue... "
+    __SIMPLE_DATE_FORMAT = "%d/%m/%Y"
+    __ISO_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
     def __init__(self, conn: Connection):
@@ -56,13 +59,15 @@ class AppController(object):
             print_delim_line("#")
             print("[1] Search articles by keywords")
             print("[2] Search articles related to one of the articles within the set")
-            print("[3] Analyse presence of edit wars in articles within the set")
-            print("[4] Analyse an article of the set in-depth")
-            print("[5] Remove article from the set")
-            print("[6] Manage stored sessions")
+            print("[3] Remove article from the set")
+            print("[4] Analyse presence of edit wars in articles within the set")
+            print("[5] Configure automatic analysis of edit wars in articles within the set")
+            print("[6] Stop automatic analysis of edit wars previously configured")
+            print("[7] Analyse an article of the set in-depth")
+            print("[8] Manage stored sessions")
             print("[0] Exit\n")
 
-            opt = input(self.CHOOSE_OPTION_MSG)
+            opt = input(self.__CHOOSE_OPTION_MSG)
             match opt:
                 case '1':
                     # Ask user about search parameters
@@ -86,7 +91,7 @@ class AppController(object):
                 case '2':
                     # Check articles set has at least 1 article to search related categories
                     if len(self.articles_set) == 0:
-                        input(self.EMPTY_SET_MSG)
+                        input(self.__EMPTY_SET_MSG)
                         continue    # Return to main menu
 
                     # Show search set
@@ -118,22 +123,33 @@ class AppController(object):
                     self.search_categories_set.clear()  # Clear search categories set once user finishes using it
 
                 case '3':
+                    # Check articles set has at least 1 article to delete
+                    if len(self.articles_set) == 0:
+                        input(self.__EMPTY_SET_MSG)
+                        continue
+
+                    # New menu until user wants to return
+                    opt_2 = ""
+                    while opt_2 != '0':
+                        opt_2 = self.__delete_articles_menu()
+
+                case '4':
                     # Check articles set is not empty before calculating edit-war values
                     if len(self.articles_set) == 0:
-                        input(self.EMPTY_SET_MSG)
+                        input(self.__EMPTY_SET_MSG)
                         continue     # Return to main menu
 
                     # Ask and validate a start date
                     msg = ("Specify start date (dd/mm/YYYY) to count revisions of searched articles (leave blank and "
                            "press Enter to use past 30 days) ")
                     default_value = datetime.now() - timedelta(days=30)
-                    start_date = ask_valid_date(msg, default_value, self.SIMPLE_DATE_FORMAT)
+                    start_date = ask_valid_date(msg, default_value, self.__SIMPLE_DATE_FORMAT)
 
                     # Ask and validate an end date
                     msg = ("Specify end date (dd/mm/YYYY) to count revisions of searched articles"
                            " (leave blank and press Enter to use current date) ")
                     default_value = datetime.now()
-                    end_date = ask_valid_date(msg, default_value, self.SIMPLE_DATE_FORMAT)
+                    end_date = ask_valid_date(msg, default_value, self.__SIMPLE_DATE_FORMAT)
 
                     # Swap dates if they are mixed
                     if start_date > end_date:
@@ -146,41 +162,44 @@ class AppController(object):
                     print_delim_line("-")
                     print("Summary of results:\n")
                     EditWarDetector.print_pages_with_tags(Singleton().articles_with_edit_war_info_dict)
-                    input(self.CONTINUE_MSG)
+                    input(self.__CONTINUE_MSG)
 
-                case '4':
+                case '5':
+                    # Check articles set has at least 1 article to monitor
+                    if len(self.articles_set) == 0:
+                        input(self.__EMPTY_SET_MSG)
+                        continue
+
+                    self.__start_monitoring_menu()
+
+                case '6':
+                    # New menu until user wants to return
+                    opt_2 = ""
+                    while opt_2 != '0':
+                        opt_2 = self.__stop_monitoring_sessions_menu()
+
+                case '7':
                     # Check articles set has at least 1 article to inspect
                     if len(self.articles_set) == 0:
-                        input(self.EMPTY_SET_MSG)
-                        continue    # Return to main menu
+                        input(self.__EMPTY_SET_MSG)
+                        continue  # Return to main menu
 
                     # Check edit wars detection has been made before inspection
                     if len(Singleton().articles_with_edit_war_info_dict) == 0:
                         input('Please, select option 3 in main menu before requesting in-depth analysis '
                               'of an article (Enter to continue) ')
-                        continue    # Return to main menu
+                        continue  # Return to main menu
 
                     # New menu until user wants to return
                     opt_2 = ""
                     while opt_2 != '0':
                         opt_2 = self.__select_article_to_inspect_menu()
 
-                case '5':
-                    # Check articles set has at least 1 article to delete
-                    if len(self.articles_set) == 0:
-                        input(self.EMPTY_SET_MSG)
-                        continue
-
+                case '8':
                     # New menu until user wants to return
                     opt_2 = ""
                     while opt_2 != '0':
-                        opt_2 = self.delete_articles_menu()
-
-                case '6':
-                    # New menu until user wants to return
-                    opt_2 = ""
-                    while opt_2 != '0':
-                        opt_2 = self.manage_sessions_menu()
+                        opt_2 = self.__manage_sessions_menu()
 
                 case '0':
                     # Check changes not saved and ask user to save them before leaving the program
@@ -189,11 +208,11 @@ class AppController(object):
                         answer = ask_yes_or_no_question(question)
 
                         if answer:
-                            self.save_session_menu()
+                            self.__save_session_menu()
 
                         clear_terminal()
                 case _:
-                    input(self.INVALID_OPTION_MSG)
+                    input(self.__INVALID_OPTION_MSG)
 
 
     @staticmethod
@@ -331,18 +350,174 @@ class AppController(object):
         return idx
 
 
+    def __delete_articles_menu(self) -> str:
+        # Show articles in set
+        clear_terminal()
+        print_delim_line("#")
+        WikiCrawler.print_pages(self.articles_set)
+        print(f'\nArticles in search set: {len(self.articles_set)}\n')
+
+        # Show options
+        idx = validate_idx(input("Select " + "nº of the article you want to delete from search set (0 to return) "),
+                        0, len(self.articles_set))
+        if idx != '0':
+            # Get article and delete it from set
+            article = self.articles_set[int(idx) - 1]
+            self.articles_set.pop(int(idx)-1)
+
+            # If edit war info has already been stored about this article it is deleted
+            info_dict = Singleton().articles_with_edit_war_info_dict
+            if len(info_dict) != 0 and info_dict.get(article):
+                info_dict.pop(article)
+
+            # Indicate that new data should be saved in database
+            self.unsaved_changes = True
+
+        return idx
+
+
+    def __start_monitoring_menu(self):
+        # Ask user about the analysis frequency
+        frequency = input("Every how many days do you want the session to be analysed? ")
+
+        valid_frequency = False
+        while not valid_frequency:
+            frequency = re.sub(r"\s+", "", frequency)
+            if not frequency.isdigit() or int(frequency) < 1:
+                frequency = input("Invalid frequency, please, indicate a valid number of days to perform the "
+                                  "analysis ")
+            else:
+                valid_frequency = True
+
+        articles_with_edit_war_info_dict: dict = Singleton().articles_with_edit_war_info_dict
+
+        # Articles have not been previously analysed, so new periods are created for each article starting from today
+        if not articles_with_edit_war_info_dict:
+            start_date = datetime.now().replace(microsecond=0)
+            end_date = datetime.now().replace(microsecond=0)
+
+            for local_page in self.articles_set:
+                articles_with_edit_war_info_dict[local_page] = ArticleEditWarInfo(local_page, start_date, end_date)
+
+        # Articles have been previously analysed, so it must be checked that the analysis period goes until today, if
+        # not it must be adjusted to start the monitoring, otherwise it is canceled
+        else:
+            # Get end date from first article
+            info = list(articles_with_edit_war_info_dict.values())[0]
+            end_date = info.end_date
+
+            # If analysis period is incompatible, the user is asked, otherwise monitoring is configured right away
+            if end_date < datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
+                answer = ask_yes_or_no_question("Articles have been previously analysed but the time period "
+                                                "does not finish in current date, which is necessary to start "
+                                                "monitoring, do you want to complete the analysis until today? ")
+
+                if answer in {"y", "yes"}:
+                    EditWarDetector.detect_edit_wars_in_set(SortedSet(articles_with_edit_war_info_dict.keys),
+                                                            info.start_date, datetime.now().replace(microsecond=0))
+                else:
+                    answer = ask_yes_or_no_question("Do you want instead to delete previous data and start a clean "
+                                                    "monitoring from today? ")
+
+                    if answer in {"y", "yes"}:
+                        # New periods are created for each article starting from today
+                        for local_page in articles_with_edit_war_info_dict.keys():
+                            start_date = datetime.now().replace(microsecond=0)
+                            end_date = datetime.now().replace(microsecond=0)
+
+                            articles_with_edit_war_info_dict[local_page] = (
+                                ArticleEditWarInfo(local_page, start_date, end_date))
+
+                        Singleton().users_info_dict.clear()
+
+        # Save data to allow the scheduled task to retrieve data from database when app is not being executed
+        input("Current session will now be saved to allow articles to be monitored, press Enter to continue...")
+
+        # Show sessions stored
+        clear_terminal()
+        print_delim_line("#")
+        sessions = print_db_table(self.db_conn, "sessions")
+
+        if not sessions:
+            print("No sessions found in database")
+
+        # Save current session
+        session_id = self.__save_session_menu()
+        self.unsaved_changes = False  # Changes saved so flag is deactivated
+
+        # Get parameters for the task
+        task_name = f'conflict_watcher_session_{session_id}_monitor'
+        directory_path = os.path.dirname(os.path.abspath(__file__))
+        #directory_path = os.path.dirname(os.path.abspath(__file__))     # Change for development only (app directory)
+
+        execution_path = directory_path
+        #execution_path = os.path.dirname(directory_path)                # Change for development only (Conflict Watcher directory)
+        #input(str(execution_path))
+
+        script_path = os.path.dirname(directory_path)
+        script_path = Path(os.path.dirname(script_path))
+        script_path = script_path / "Conflict Watcher.exe"
+        #script_path = os.path.join(directory_path, "main.py")           # Change for development only
+        args = f'--monitor --session_id {session_id}'
+
+        # Create task
+        create_scheduled_task(task_name, int(frequency), execution_path, script_path, args)
+
+        # Mark session as monitored
+        update_db_table(self.db_conn, "sessions", "monitored=?", [True], str(session_id))
+
+
+    def __stop_monitoring_sessions_menu(self):
+        # Show monitored sessions in database
+        clear_terminal()
+        print_delim_line("#")
+
+        # Sanitize_and_execute_select function is used instead of fetch_items_from_db because the latter does not
+        # return the cursor description (column names) needed to print the results with print_query_contents
+        results = sanitize_and_execute_select(self.db_conn, "SELECT * FROM sessions WHERE monitored=1")
+        description, rows = results
+        print_query_contents(description, rows)
+
+        # 0 is added right-away to allow return option
+        monitored_sessions_ids_list = [0]
+        for session in rows:
+            monitored_sessions_ids_list.append(session[0])
+
+        print(f'\nSessions being monitored: {len(rows)}\n')
+        print_delim_line("-")
+
+        # Ask user about the session that wants to stop monitoring
+        session_id = validate_idx_in_list(input("Select " + "ID of the session you want to stop monitoring: "
+                                                            "(0 to return) "), monitored_sessions_ids_list)
+
+        if session_id != '0':
+            # Stop monitoring task for this session
+            delete_scheduled_task(session_id)
+
+            # Change monitored value of session in database
+            update_db_table(self.db_conn, "sessions", "monitored=?",
+                            [False], session_id)
+
+            # Update stored_sessions_ids_list
+            monitored_sessions_ids_list.remove(int(session_id))
+
+        clear_n_lines(5 + len(rows) + 4 + Singleton().shared_dict["lines_to_remove"])
+
+        return session_id
+
+
     def __select_article_to_inspect_menu(self) -> str:
         # Show articles with edit war tags from Singleton dict
         clear_terminal()
         print_delim_line("#")
         info_dict = Singleton().articles_with_edit_war_info_dict
-        ids_dict = EditWarDetector.print_pages_with_tags(info_dict)     # Retrieve ids to access info later
+        ids_dict = EditWarDetector.print_pages_with_tags(info_dict)  # Retrieve ids to access info later
         print(f'\nArticles in search set: {len(self.articles_set)}\n')
 
         article_id = validate_idx(input("Select nº of the article you want to inspect (0 to return) "),
-                           0, len(self.articles_set))
+                                  0, len(self.articles_set))
         if article_id != '0':
-            local_page = ids_dict[int(article_id)]      # Selected article to inspect
+            local_page = ids_dict[int(article_id)]  # Selected article to inspect
 
             # New menu until user wants to return
             opt = ""
@@ -379,7 +554,7 @@ class AppController(object):
         print(f'\n\t- Conflict\'s size (nº of users mutually reverting each other): {n_mutual_reverters}')
 
         # Conflict's temporal evolution
-        self.__print_conflict_evolution(info)
+        self._print_conflict_evolution(info)
 
         # Fighting editors ordered from higher to lower activity (based on the nº of mutual reverts made)
         ordered_mutual_reverters_dict = dict(sorted(info.mutual_reverters_dict.items(), key=lambda item: item[1],
@@ -391,7 +566,7 @@ class AppController(object):
             print(f'\t\t{i + 1} --> {user_i} --> {edits}')
 
         # Top 10 most reverted revisions, along with the number of reverts
-        reverted_revisions_dict = self.__print_most_reverted_revisions(info)
+        reverted_revisions_dict = self._print_most_reverted_revisions(info)
 
         # Show options
         print_delim_line("-")
@@ -401,7 +576,7 @@ class AppController(object):
         print("[4] Inspect a revision from the list")
         print("[0] Return to articles' list\n")
 
-        opt = input(self.CHOOSE_OPTION_MSG)
+        opt = input(self.__CHOOSE_OPTION_MSG)
         match opt:
             case '1':
                 # Show history page
@@ -410,7 +585,7 @@ class AppController(object):
                 self.unsaved_changes = WikiCrawler.print_pages(SortedSet({local_page}),
                                                                time_range=(info.start_date, info.end_date),
                                                                history_changes=True)
-                input(self.CONTINUE_MSG)
+                input(self.__CONTINUE_MSG)
             case '2':
                 # Show discussion page
                 clear_terminal()
@@ -418,7 +593,7 @@ class AppController(object):
                 self.unsaved_changes = WikiCrawler.print_pages(SortedSet({local_page}),
                                                                time_range=(info.start_date, info.end_date),
                                                                discussion_changes=True)
-                input(self.CONTINUE_MSG)
+                input(self.__CONTINUE_MSG)
             case '3':
                 # Show user info, new menu until user wants to return
                 self.__inspect_user_menu(info)
@@ -426,14 +601,14 @@ class AppController(object):
                 # Show revision info, new menu until user wants to return
                 self.__inspect_revision_menu(info, reverted_revisions_dict)
             case '0':
-                pass # Return
+                pass  # Return
             case _:
-                input(self.INVALID_OPTION_MSG) # No value needed from input, used to inform user
+                input(self.__INVALID_OPTION_MSG)  # No value needed from input, used to inform user
 
         return opt
 
 
-    def __print_conflict_evolution(self, info: ArticleEditWarInfo):
+    def _print_conflict_evolution(self, info: ArticleEditWarInfo):
         print("\n\t- Conflict's temporal evolution (graph with edit war values over time): ")
         intervals = ArticleEditWarInfo.split_time_interval(info.start_date, info.end_date)
         x_vals, y_vals = [], []
@@ -441,10 +616,10 @@ class AppController(object):
         # If values are already stored, they are directly assigned to graph's values
         if len(info.edit_war_over_time_list) > 1:
             for i, interval_end_date in enumerate(intervals):
-                x_vals.append(interval_end_date.strftime(self.SIMPLE_DATE_FORMAT))
+                x_vals.append(interval_end_date.strftime(self.__SIMPLE_DATE_FORMAT))
                 y_vals.append(int(info.edit_war_over_time_list[i][0]))
 
-        else: # Otherwise, they are calculated
+        else:  # Otherwise, they are calculated
             print("\n\t==> Calculating edit war values to plot...\n")
 
             # Calculate edit war values for each of the intervals. To do so, the revs_list of each interval has to
@@ -453,7 +628,7 @@ class AppController(object):
             last_rev_idx = 0
 
             # Save last value (complete time range) as it is already calculated in graph's values
-            x_vals.append(intervals[-1].strftime(self.SIMPLE_DATE_FORMAT))
+            x_vals.append(intervals[-1].strftime(self.__SIMPLE_DATE_FORMAT))
             y_vals.append(int(info.edit_war_over_time_list[-1][0]))
 
             # Indicate that new data should be saved in database
@@ -463,7 +638,7 @@ class AppController(object):
 
                 # For each interval create the list of revisions published within it
                 for local_rev in info.revs_list[last_rev_idx:]:
-                    rev_date = datetime.strptime(local_rev.timestamp, self.ISO_DATE_FORMAT)
+                    rev_date = datetime.strptime(local_rev.timestamp, self.__ISO_DATE_FORMAT)
 
                     if rev_date > interval_end_date:
                         break
@@ -476,11 +651,11 @@ class AppController(object):
                 info.edit_war_over_time_list.insert(-1, (edit_war_value, interval_end_date))
 
                 # Save interval results in graph's values (penultimate position as last value is already stored)
-                x_vals.insert(-1, interval_end_date.strftime(self.SIMPLE_DATE_FORMAT))
+                x_vals.insert(-1, interval_end_date.strftime(self.__SIMPLE_DATE_FORMAT))
                 y_vals.insert(-1, int(edit_war_value))
 
                 clear_n_lines(1)
-                print(f'\t\tIntervals with edit war value calculated {i+2}/{len(intervals)}')
+                print(f'\t\tIntervals with edit war value calculated {i + 2}/{len(intervals)}')
 
             clear_n_lines(3)
 
@@ -491,7 +666,7 @@ class AppController(object):
 
 
     @staticmethod
-    def __print_most_reverted_revisions(info: ArticleEditWarInfo) -> dict:
+    def _print_most_reverted_revisions(info: ArticleEditWarInfo) -> dict:
         # Create a dictionary where, for each revision, a set with all the revisions that revert to it is stored
         reverted_revisions_dict = {}
         for reverted_rev, revertant_rev, reverted_users in info.reverts_list:
@@ -507,7 +682,7 @@ class AppController(object):
               f'indicate bots\' presence, trying to impose the narrative of a particular revision): ')
         print("\n\t\tRANK --> [REVISION ID, TIMESTAMP, AUTHOR] --> Nº OF REVERTS TO THAT REVISION")
         for i, (rev_id, [rev, reverts_list]) in enumerate(top10):
-            print(f'\t\t{i+1} --> [{rev_id}, {rev.timestamp}, {rev.user}] '
+            print(f'\t\t{i + 1} --> [{rev_id}, {rev.timestamp}, {rev.user}] '
                   f'--> {len(reverts_list)}')
 
         return reverted_revisions_dict
@@ -525,7 +700,8 @@ class AppController(object):
         user_info = users_info_dict.get(username)
 
         # If any required info about the user is missing, it is retrieved from Wikipedia
-        if not user_info or user_info.is_registered is None or (user_info.is_registered == False and user_info.asn is None):
+        if not user_info or user_info.is_registered is None or (
+                user_info.is_registered == False and user_info.asn is None):
             # Create a User object from Wikipedia to retrieve info and create a user_info object
             user = pywikibot.User(WikiCrawler.site, username)
 
@@ -546,7 +722,6 @@ class AppController(object):
             print(f'\n\t- Username: {username} \n\n\t- Is registered?: {is_registered} '
                   f'\n\n\t- Is blocked?: {is_blocked} \n\n\t- Registration date: {registration} '
                   f'\n\n\t- Nº of global user edits (0 for anonymous users, ie. IP) {edit_count}')
-
 
             # Check if the username corresponds to an IP address (editor not registered in Wikipedia), if it is the case
             # a Whois request is made and additional info printed
@@ -596,13 +771,13 @@ class AppController(object):
 
         # Otherwise, all required info about the user is stored, so it is simply printed
         else:
-            self.print_user_info(user_info)
+            self._print_user_info(user_info)
 
-        input(self.CONTINUE_MSG)
+        input(self.__CONTINUE_MSG)
 
 
     @staticmethod
-    def print_user_info(user_info: LocalUser):
+    def _print_user_info(user_info: LocalUser):
         # Print all info stored about the user
         clear_terminal()
         print_delim_line("#")
@@ -655,7 +830,7 @@ class AppController(object):
 
         # If the text of the revision is not stored, it is retrieved from Wikipedia
         if not selected_local_rev.text:
-            rev_date = datetime.strptime(selected_local_rev.timestamp, self.ISO_DATE_FORMAT)
+            rev_date = datetime.strptime(selected_local_rev.timestamp, self.__ISO_DATE_FORMAT)
             fam, code = info.article.site.split(":", 1)
             site = pywikibot.Site(code, fam)
 
@@ -663,7 +838,7 @@ class AppController(object):
                 info.article.page = next(site.load_pages_from_pageids([info.article.pageid]))
 
             local_rev_list = WikiCrawler.get_full_revisions_in_range(site, info.article.page, rev_date, rev_date,
-                                                                     include_text = True)
+                                                                     include_text=True)
 
             contents = local_rev_list[0].revision['slots']['main'].get('*', None)
         else:
@@ -673,43 +848,17 @@ class AppController(object):
         if contents is None:
             print("\n\t- Contents: Not publicly available (deleted or protected)")
 
-        else: # Otherwise, it is stored and printed
+        else:  # Otherwise, it is stored and printed
             selected_local_rev.text = contents
             print(f'\n\t- Contents: \n\n{contents}')
 
             # Indicate that new data should be saved in database
             self.unsaved_changes = True
 
-        input(self.CONTINUE_MSG)
+        input(self.__CONTINUE_MSG)
 
 
-    def delete_articles_menu(self) -> str:
-        # Show articles in set
-        clear_terminal()
-        print_delim_line("#")
-        WikiCrawler.print_pages(self.articles_set)
-        print(f'\nArticles in search set: {len(self.articles_set)}\n')
-
-        # Show options
-        idx = validate_idx(input("Select " + "nº of the article you want to delete from search set (0 to return) "),
-                        0, len(self.articles_set))
-        if idx != '0':
-            # Get article and delete it from set
-            article = self.articles_set[int(idx) - 1]
-            self.articles_set.pop(int(idx)-1)
-
-            # If edit war info has already been stored about this article it is deleted
-            info_dict = Singleton().articles_with_edit_war_info_dict
-            if len(info_dict) != 0 and info_dict.get(article):
-                info_dict.pop(article)
-
-            # Indicate that new data should be saved in database
-            self.unsaved_changes = True
-
-        return idx
-
-
-    def manage_sessions_menu(self) -> str:
+    def __manage_sessions_menu(self) -> str:
         # Show sessions stored
         clear_terminal()
         print_delim_line("#")
@@ -732,7 +881,7 @@ class AppController(object):
         print("[5] Reset database")
         print("[0] Return to main menu \n")
 
-        opt = input(self.CHOOSE_OPTION_MSG)
+        opt = input(self.__CHOOSE_OPTION_MSG)
         match opt:
             case '1':
                 # Load data from a previous session
@@ -744,27 +893,27 @@ class AppController(object):
                         if session[0] == int(session_id):
                             break
 
-                    self.__load_session_data(session)
+                    self._load_session_data(session_id)
 
             case '2':
                 # Save current session
-                self.save_session_menu()
+                self.__save_session_menu()
                 self.unsaved_changes = False    # Changes saved so flag is deactivated
 
             case '3':
                 # Delete a saved session
                 if len(sessions) == 0:
-                    input(self.EMPTY_SESSIONS_MSG)
+                    input(self.__EMPTY_SESSIONS_MSG)
                 else:
                     # New menu until user wants to return
                     opt_2 = ""
                     while opt_2 != '0':
-                        opt_2 = self.delete_session_menu(stored_sessions_ids_list)
+                        opt_2 = self.__delete_session_menu(stored_sessions_ids_list)
 
             case '4':
                 # Make a custom SQL query to the database
                 if len(sessions) == 0:
-                    input(self.EMPTY_SESSIONS_MSG)
+                    input(self.__EMPTY_SESSIONS_MSG)
                 else:
                     # Ask user about the session that wants to query
                     session_id = validate_idx_in_list(input("\nSelect nº of the session you want to query "
@@ -787,7 +936,7 @@ class AppController(object):
                                 # New menu until user wants to return
                                 opt_2 = ""
                                 while opt_2 != '0':
-                                    opt_2 = self.query_session_menu()
+                                    opt_2 = self.__query_session_menu()
                                 break # Stop loop once session was already found and queried
 
                         # Remove temporal database file after closing the connection to it
@@ -807,12 +956,12 @@ class AppController(object):
             case '0':
                 pass # Return
             case _:
-                input(self.INVALID_OPTION_MSG)
+                input(self.__INVALID_OPTION_MSG)
 
         return opt
 
 
-    def __load_session_data(self, session_data: Tuple):
+    def _load_session_data(self, session_id: str):
         # First of all, data currently loaded in the tool must be deleted to avoid mixing information
         singleton = Singleton()
         singleton.articles_with_edit_war_info_dict.clear()
@@ -820,7 +969,6 @@ class AppController(object):
         singleton.shared_dict.clear()
 
         # 1º Load data in articles_set from articles' table
-        session_id = session_data[0]
         session_articles = fetch_items_from_db(self.db_conn, "articles", "session = ?", [session_id])
         articles_ids_dict:dict[str, LocalPage] = {}
 
@@ -851,10 +999,11 @@ class AppController(object):
         periods_ids_dict: dict[str, LocalPage] = {}
         for period in session_periods:
             article = articles_ids_dict[period[2]]
-            start_date = datetime.strptime(period[3], self.ISO_DATE_FORMAT) if period[2] else None
-            end_date = datetime.strptime(period[4], self.ISO_DATE_FORMAT) if period[2] else None
+            start_date = datetime.strptime(period[3], self.__ISO_DATE_FORMAT) if period[2] else None
+            end_date = datetime.strptime(period[4], self.__ISO_DATE_FORMAT) if period[2] else None
+            edit_war_notified = period[5] if period[2] else None
 
-            article_info = ArticleEditWarInfo(article, start_date, end_date)
+            article_info = ArticleEditWarInfo(article, start_date, end_date, edit_war_notified)
 
             articles_with_edit_war_info_dict[article] = article_info
             periods_ids_dict[period[1]] = article
@@ -866,7 +1015,7 @@ class AppController(object):
         for edit_war_value in session_values:
             article = periods_ids_dict[edit_war_value[1]]
             info = articles_with_edit_war_info_dict[article]
-            date = datetime.strptime(edit_war_value[2], self.ISO_DATE_FORMAT) if edit_war_value[2] else None
+            date = datetime.strptime(edit_war_value[2], self.__ISO_DATE_FORMAT) if edit_war_value[2] else None
             value = edit_war_value[3]
 
             info.edit_war_over_time_list.append((value, date))
@@ -940,7 +1089,7 @@ class AppController(object):
             site = user[3]
             is_registered = bool(user[4]) if user[4] is not None else None
             is_blocked = bool(user[5]) if user[5] is not None else None
-            registration_date = datetime.strptime(user[6], self.ISO_DATE_FORMAT) if user[6] else None
+            registration_date = datetime.strptime(user[6], self.__ISO_DATE_FORMAT) if user[6] else None
             edit_count = user[7]
             asn = user[8]
             asn_description = user[9]
@@ -991,10 +1140,12 @@ class AppController(object):
 
             info.mutual_reverters_dict[username] = int(mutual_reverter_activity[3])
 
-        input("Session successfully loaded (Enter to continue) ")
+        # Only use input if a terminal is being used (automatic execution does not and could get blocked)
+        if sys.stdin.isatty():
+            input("Session successfully loaded (Enter to continue) ")
 
 
-    def save_session_menu(self):
+    def __save_session_menu(self) -> int:
         # Show stored sessions and ask user a name to save the new session
         session_id, session_overwritten = save_session_data(self.db_conn)
 
@@ -1004,7 +1155,7 @@ class AppController(object):
         # In case the session was previously stored and overwritten, data previously stored in this session and
         # eliminated during program execution must be eliminated from database too
         if session_overwritten:
-            self.delete_remaining_session_data_from_db(str(session_id))
+            self._delete_remaining_session_data_from_db(str(session_id))
 
         # Save articles' information on articles' table
         articles_ids_dict: dict[int, int] = dict[int, int]()
@@ -1080,8 +1231,10 @@ class AppController(object):
 
         input("Session data successfully saved (Enter to continue) ")
 
+        return session_id
 
-    def delete_remaining_session_data_from_db(self, session_id: str):
+
+    def _delete_remaining_session_data_from_db(self, session_id: str):
         # 1º Delete articles not included anymore
         session_articles = fetch_items_from_db(self.db_conn, "articles", "session = ?",
                                                [session_id])
@@ -1123,23 +1276,28 @@ class AppController(object):
         session_periods = fetch_items_from_db(self.db_conn, "edit_war_analysis_periods", "article IN (",
                                               list(articles_ids_dict.values()), in_clause=True)
 
-        periods_dict = {period[2]: (period[0], period[1], period[3], period[4]) for period in session_periods}
+        periods_dict = {period[2]: (period[0], period[1], period[3], period[4], period[5]) for period in
+                        session_periods}
 
-        # Iterate periods_dict keeping only those entries that do not match the start and end dates saved for any of the
-        # articles loaded (those that must be deleted from db)
+        # Iterate periods_dict keeping only those entries that do not match the start and end dates or the notified
+        # attribute saved for any of the articles loaded (those that must be deleted from db)
         for article, article_info in Singleton().articles_with_edit_war_info_dict.items():
-            article_id = articles_ids_dict[article.pageid]
-            if article_id in periods_dict.keys():
-                article_start_date = datetime_to_iso(article_info.start_date)
-                article_end_date = datetime_to_iso(article_info.end_date)
-                start_date = periods_dict[article_id][2]
-                end_date = periods_dict[article_id][3]
+            if articles_ids_dict.get(article.pageid):
+                article_id = articles_ids_dict[article.pageid]
+                if article_id in periods_dict.keys():
+                    article_start_date = datetime_to_iso(article_info.start_date)
+                    article_end_date = datetime_to_iso(article_info.end_date)
+                    article_edit_war_notified = article_info.edit_war_notified
+                    start_date = periods_dict[article_id][2]
+                    end_date = periods_dict[article_id][3]
+                    edit_war_notified = periods_dict[article_id][4]
 
-                if article_start_date != start_date or article_end_date != end_date:
-                    periods_dict.pop(article_id)
+                    if (article_start_date != start_date or article_end_date != end_date or
+                            article_edit_war_notified != edit_war_notified):
+                        periods_dict.pop(article_id)
 
         # Delete remaining entries
-        for rowid, _, _, _ in periods_dict.values():
+        for rowid, _, _, _, _ in periods_dict.values():
             delete_from_db_table(self.db_conn, "edit_war_analysis_periods", rowid)
 
         # 4º Delete users not included anymore
@@ -1149,7 +1307,7 @@ class AppController(object):
         delete_non_referenced_users(self.db_conn)
 
 
-    def delete_session_menu(self, stored_sessions_ids_list: list[int]) -> str:
+    def __delete_session_menu(self, stored_sessions_ids_list: list[int]) -> str:
         # Show sessions in database
         clear_terminal()
         print_delim_line("#")
@@ -1165,9 +1323,9 @@ class AppController(object):
             # Delete session from database
             delete_from_db_table(self.db_conn, "sessions", int(session_id))
             # Update stored_sessions_ids_list
-            stored_sessions_ids_list.pop(int(session_id))
+            stored_sessions_ids_list.remove(int(session_id))
             # Delete remaining data about deleted session (data that is not deleted in cascade once session is deleted)
-            self.delete_remaining_session_data_from_db(session_id)
+            self._delete_remaining_session_data_from_db(session_id)
 
         clear_n_lines(5 + len(sessions) + 4 + Singleton().shared_dict["lines_to_remove"])
 
@@ -1175,7 +1333,7 @@ class AppController(object):
 
 
     @staticmethod
-    def query_session_menu() -> str:
+    def __query_session_menu() -> str:
         # Ask user about the query
         query = input("\nPlease, write your SELECT query: ")
 
