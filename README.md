@@ -11,16 +11,23 @@ to detect the presence of edit wars.
 
 ## Features
 
-- Main feature 1
-- Main feature 2
-- Support for X and Y
-- Compatible with Z
+- Search of Wikipedia articles by keywords and related articles 
+- Edit wars detection through the mutual reverts-based method presented by Sumi et al.
+- Temporal representation of edit wars evolution
+- Extraction of conflict-related information (severity, size, top mutual reverts, top reverted revisions...)
+- In-depth analysis of users and revisions of selected articles
+- SQLite storage and sharing of results
+- Fine-grained data analysis through SQLite queries
+- Automatic (and configurable) monitoring of edit wars within articles, generating a system alert when detected 
+- Support for Windows and, theoretically, Unix, although the latter has not been tested 
+- Compatible with articles from any language supported by Wikipedia
+- Real-time adaptability to most screen resolutions
+
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.13+ (including SQLite)
 - Packages listed in `requirements.txt`
-- Other requirements
 
 ## Provided build execution
 
